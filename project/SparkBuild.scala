@@ -18,7 +18,7 @@ object SparkBuild extends Build {
     organization := "org.spark-project",
     version := "0.4-SNAPSHOT",
     scalaVersion := "2.9.1",
-    scalacOptions := Seq(/*"-deprecation",*/ "-unchecked", "-optimize"), // -deprecation is too noisy due to usage of old Hadoop API, enable it once that's no longer an issue
+    scalacOptions := Seq("-unchecked", "-optimize"), // -deprecation is too noisy due to usage of old Hadoop API, enable it once that's no longer an issue
     unmanagedJars in Compile <<= baseDirectory map { base => (base / "lib" ** "*.jar").classpath },
     retrieveManaged := true,
     transitiveClassifiers in Scope.GlobalScope := Seq("sources"),
@@ -38,6 +38,7 @@ object SparkBuild extends Build {
 
   def coreSettings = sharedSettings ++ Seq(
     name := "spark-core",
+    resolvers += "Typesafe Repository" at "http://repo.typesafe.com/typesafe/releases/",
     libraryDependencies ++= Seq(
       "com.google.guava" % "guava" % "r09",
       "log4j" % "log4j" % "1.2.16",
@@ -47,7 +48,8 @@ object SparkBuild extends Build {
       "org.apache.hadoop" % "hadoop-core" % "0.20.2",
       "asm" % "asm-all" % "3.3.1",
       "com.google.protobuf" % "protobuf-java" % "2.3.0",
-      "de.javakaffee" % "kryo-serializers" % "0.9"
+      "de.javakaffee" % "kryo-serializers" % "0.9",
+      "se.scalablesolutions.akka" % "akka-actor" % "1.2"
     )
   ) ++ assemblySettings ++ Seq(test in Assembly := {})
 
