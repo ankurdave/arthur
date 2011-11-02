@@ -21,7 +21,7 @@ class EventReporterActor extends Actor with Logging {
 
 class EventReporter(isMaster: Boolean) extends Logging {
   val host = System.getProperty("spark.master.host")
-  val port = System.getProperty("spark.master.port").toInt
+  val port = System.getProperty("spark.master.akkaPort").toInt
 
   // Remote reference to the actor on workers
   var reporterActor: Option[ActorRef] =

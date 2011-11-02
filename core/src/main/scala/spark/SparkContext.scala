@@ -38,6 +38,8 @@ extends Logging {
     System.setProperty("spark.master.host", Utils.localHostName)
   if (System.getProperty("spark.master.port") == null)
     System.setProperty("spark.master.port", "50501")
+  if (System.getProperty("spark.master.akkaPort") == null)
+    System.setProperty("spark.master.akkaPort", "50502")
 
   // Make sure a proper class loader is set for remote actors (unless user set one)
   if (RemoteActor.classLoader == null)
