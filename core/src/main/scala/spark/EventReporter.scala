@@ -6,16 +6,15 @@ import akka.actor.ActorRef
 
 sealed trait EventReporterMessage
 case class ReportException(exception: Throwable) extends EventReporterMessage
-case object StopEventReporter extends EventReporterMessage
+case class ReportRDDCreation(rdd: RDD[_]) extends EventReporterMessage
 
 class EventReporterActor extends Actor with Logging {
   def receive = {
-    case ReportException(exception: Throwable) =>
+    case ReportException(exception) =>
       logInfo("Received exception: %s".format(exception))
 
-    case StopEventReporter =>
-      self.reply('OK)
-      exit()
+    case ReportRDDCreation(rdd) =>
+      logInfo("Received RDD creation: %s".format(rdd))
   }
 }
 
@@ -24,24 +23,18 @@ class EventReporter(isMaster: Boolean) extends Logging {
   val port = System.getProperty("spark.master.akkaPort").toInt
 
   // Remote reference to the actor on workers
-  var reporterActor: Option[ActorRef] =
+  var reporterActor: ActorRef = {
     if (isMaster) {
       remote.start(host, port).register("EventReporter", actorOf[EventReporterActor])
-      // TODO: need to unregister this actor; see register() in
-      // http://akka.io/api/akka/1.2/akka/remoteinterface/RemoteServerModule.html
-      None
-    } else {
-      Some(remote.actorFor("EventReporter", host, port))
     }
-
-  def reportException(exception: Throwable) {
-    for (actor <- reporterActor)
-      actor ! ReportException(exception)
+    remote.actorFor("EventReporter", host, port)
   }
 
-  def stop() {
-    for (actor <- reporterActor)
-      actor ! StopEventReporter
-    reporterActor = None
+  def reportException(exception: Throwable) {
+    reporterActor ! ReportException(exception)
+  }
+
+  def reportRDDCreation(rdd: RDD[_]) {
+    reporterActor ! ReportRDDCreation(rdd)
   }
 }

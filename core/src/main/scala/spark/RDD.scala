@@ -63,6 +63,8 @@ abstract class RDD[T: ClassManifest](@transient sc: SparkContext) extends Serial
   
   // Variables relating to caching
   private var shouldCache = false
+
+  SparkEnv.get.eventReporter.reportRDDCreation(this)
   
   // Change this RDD's caching
   def cache(): RDD[T] = {
