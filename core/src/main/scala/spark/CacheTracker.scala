@@ -131,7 +131,7 @@ class CacheTracker(isMaster: Boolean, theCache: Cache) extends Logging {
       // TODO: fetch any remote copy of the split that may be available
       // TODO: also register a listener for when it unloads
       logInfo("Computing partition " + split)
-      val array = rdd.compute(split).toArray(m)
+      val array = new ChecksummingIterator(rdd, split, rdd.compute(split)).toArray(m)
       cache.put(key, array)
       loading.synchronized {
         loading.remove(key)

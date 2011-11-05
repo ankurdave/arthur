@@ -77,7 +77,7 @@ abstract class RDD[T: ClassManifest](@transient sc: SparkContext) extends Serial
     if (shouldCache) {
       SparkEnv.get.cacheTracker.getOrCompute[T](this, split)
     } else {
-      compute(split)
+      new ChecksummingIterator(this, split, compute(split))
     }
   }
   
