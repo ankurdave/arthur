@@ -3,6 +3,7 @@ package spark
 import akka.actor.Actor
 import akka.actor.Actor._
 import akka.actor.ActorRef
+import akka.dispatch.MessageDispatcher
 import java.io.{FileOutputStream, FileNotFoundException}
 
 sealed trait EventReporterMessage
@@ -10,7 +11,9 @@ case class ReportException(exception: Throwable) extends EventReporterMessage
 case class ReportRDDCreation(rdd: RDD[_]) extends EventReporterMessage
 case class ReportRDDChecksum(rdd: RDD[_], split: Split, checksum: Int) extends EventReporterMessage
 
-class EventReporterActor extends Actor with Logging {
+class EventReporterActor(dispatcher: MessageDispatcher) extends Actor with Logging {
+  self.dispatcher = dispatcher
+
   val eventLog =
     try {
       Some(new FileOutputStream(System.getProperty("spark.logging.eventLog"), true))
@@ -42,7 +45,8 @@ class EventReporter(isMaster: Boolean) extends Logging {
   // Remote reference to the actor on workers
   var reporterActor: ActorRef = {
     if (isMaster) {
-      remote.start(host, port).register("EventReporter", actorOf[EventReporterActor])
+      val dispatcher = new DaemonDispatcher("mydispatcher")
+      remote.start(host, port).register("EventReporter", actorOf(new EventReporterActor(dispatcher)))
     }
     remote.actorFor("EventReporter", host, port)
   }

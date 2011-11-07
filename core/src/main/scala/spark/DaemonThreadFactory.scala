@@ -1,5 +1,8 @@
 package spark
 
+import akka.dispatch.ExecutorBasedEventDrivenDispatcher
+import akka.dispatch.MessageDispatcher
+import akka.dispatch.MonitorableThreadFactory
 import java.util.concurrent.ThreadFactory
 
 /**
@@ -12,3 +15,16 @@ private object DaemonThreadFactory extends ThreadFactory {
     return t
   }
 }
+
+/**
+ * An Akka dispatcher that creates actors with daemon threads
+ */
+class DaemonDispatcher(name: String) extends {
+  override val threadFactory = new MonitorableThreadFactory(name) {
+    override def newThread(runnable: Runnable) = {
+      val thread = super.newThread(runnable)
+      thread.setDaemon(true)
+      thread
+    }
+  }
+} with ExecutorBasedEventDrivenDispatcher(name)
