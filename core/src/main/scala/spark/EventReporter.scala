@@ -9,6 +9,7 @@ import java.io._
 sealed trait EventReporterMessage
 case class ReportException(exception: Throwable) extends EventReporterMessage
 case class ReportRDDCreation(rdd: RDD[_]) extends EventReporterMessage
+case class ReportParallelCollectionCreation[T](data: Seq[T], numSlices: Int) extends EventReporterMessage
 case class ReportRDDChecksum(rdd: RDD[_], split: Split, checksum: Int) extends EventReporterMessage
 
 class EventReporterActor(dispatcher: MessageDispatcher) extends Actor with Logging {
@@ -30,8 +31,17 @@ class EventReporterActor(dispatcher: MessageDispatcher) extends Actor with Loggi
     }
 
   def receive = {
-    case msg: EventReporterMessage =>
-      for (l <- eventLog) l.writeObject(msg)
+    case ReportRDDCreation(rdd) => rdd match {
+      case pc: ParallelCollection[_] =>
+        for (l <- eventLog)
+          l.writeObject(ReportParallelCollectionCreation(pc.data, pc.numSlices))
+      case _ =>
+        for (l <- eventLog)
+          l.writeObject(ReportRDDCreation(rdd))
+    }
+
+    case otherMsg: EventReporterMessage =>
+      for (l <- eventLog) l.writeObject(otherMsg)
   }
 }
 

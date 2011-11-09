@@ -45,12 +45,13 @@ import SparkContext._
  * In addition, PairRDDFunctions contains extra methods available on RDDs of key-value pairs,
  * and SequenceFileRDDFunctions contains extra methods for saving RDDs to Hadoop SequenceFiles.
  */
-abstract class RDD[T: ClassManifest](@transient var sc: SparkContext) extends Serializable {
+abstract class RDD[T: ClassManifest](@transient sc: SparkContext) extends Serializable {
   // Methods that must be implemented by subclasses
   def splits: Array[Split]
   def compute(split: Split): Iterator[T]
   val dependencies: List[Dependency[_]]
-  
+  def setContext(newContext: SparkContext): RDD[T]
+
   // Optionally overridden by subclasses to specify how they are partitioned
   val partitioner: Option[Partitioner] = None
 
@@ -194,19 +195,6 @@ abstract class RDD[T: ClassManifest](@transient var sc: SparkContext) extends Se
   def saveAsObjectFile(path: String) {
     this.glom.map(x => (NullWritable.get(), new BytesWritable(Utils.serialize(x)))).saveAsSequenceFile(path)
   }
-
-  /**
-   * Recursively sets the SparkContext for this RDD and its dependencies.
-   */
-  def setContext(newContext: SparkContext) {
-    val rdds = new Queue[RDD[_]]
-    rdds += this
-    while (rdds.nonEmpty) {
-      val r = rdds.dequeue()
-      r.sc = newContext
-      rdds ++= r.dependencies.map(_.rdd)
-    }
-  }
 }
 
 class MappedRDD[U: ClassManifest, T: ClassManifest](
@@ -215,6 +203,8 @@ extends RDD[U](prev.context) {
   override def splits = prev.splits
   override val dependencies = List(new OneToOneDependency(prev))
   override def compute(split: Split) = prev.iterator(split).map(f)
+  override def setContext(newContext: SparkContext): MappedRDD[U, T] =
+    new MappedRDD(prev.setContext(newContext), f)
 }
 
 class FlatMappedRDD[U: ClassManifest, T: ClassManifest](
@@ -223,6 +213,8 @@ extends RDD[U](prev.context) {
   override def splits = prev.splits
   override val dependencies = List(new OneToOneDependency(prev))
   override def compute(split: Split) = prev.iterator(split).flatMap(f)
+  override def setContext(newContext: SparkContext): FlatMappedRDD[U, T] =
+    new FlatMappedRDD(prev.setContext(newContext), f)
 }
 
 class FilteredRDD[T: ClassManifest](
@@ -231,6 +223,8 @@ extends RDD[T](prev.context) {
   override def splits = prev.splits
   override val dependencies = List(new OneToOneDependency(prev))
   override def compute(split: Split) = prev.iterator(split).filter(f)
+  override def setContext(newContext: SparkContext): FilteredRDD[T] =
+    new FilteredRDD(prev.setContext(newContext), f)
 }
 
 class GlommedRDD[T: ClassManifest](prev: RDD[T])
@@ -238,6 +232,8 @@ extends RDD[Array[T]](prev.context) {
   override def splits = prev.splits
   override val dependencies = List(new OneToOneDependency(prev))
   override def compute(split: Split) = Array(prev.iterator(split).toArray).iterator
+  override def setContext(newContext: SparkContext): GlommedRDD[T] =
+    new GlommedRDD(prev.setContext(newContext))
 }
 
 class MapPartitionsRDD[U: ClassManifest, T: ClassManifest](
@@ -246,4 +242,6 @@ extends RDD[U](prev.context) {
   override def splits = prev.splits
   override val dependencies = List(new OneToOneDependency(prev))
   override def compute(split: Split) = f(prev.iterator(split))
+  override def setContext(newContext: SparkContext): MapPartitionsRDD[U, T] =
+    new MapPartitionsRDD(prev.setContext(newContext), f)
 }

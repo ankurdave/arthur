@@ -40,4 +40,7 @@ extends RDD[Pair[T, U]](sc) with Serializable {
       def getParents(id: Int): Seq[Int] = List(id % numSplitsInRdd2)
     }
   )
+
+  override def setContext(newContext: SparkContext): CartesianRDD[T, U] =
+    new CartesianRDD(newContext, rdd1.setContext(newContext), rdd2.setContext(newContext))
 }

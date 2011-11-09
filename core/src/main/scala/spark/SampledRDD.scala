@@ -33,4 +33,7 @@ extends RDD[T](prev.context) {
       prev.iterator(split.prev).filter(x => (rg.nextDouble <= frac))
     }
   }
+
+  override def setContext(newContext: SparkContext): SampledRDD[T] =
+    new SampledRDD(prev.setContext(newContext), withReplacement, frac, seed)
 }

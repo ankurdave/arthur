@@ -47,6 +47,9 @@ extends RDD[String](parent.context) {
     // Return an iterator that read lines from the process's stdout
     Source.fromInputStream(proc.getInputStream).getLines
   }
+
+  override def setContext(newContext: SparkContext): PipedRDD[T] =
+    new PipedRDD(parent.setContext(newContext), command)
 }
 
 object PipedRDD {

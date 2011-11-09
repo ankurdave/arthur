@@ -6,7 +6,6 @@ import java.io._
 
 object EventLogParser {
   def readRDDs(sc: SparkContext): Seq[RDD[_]] = {
-    println("Test")
     val ois = new ObjectInputStream(new FileInputStream(System.getProperty("spark.logging.eventLog")))
     val rdds = new ArrayBuffer[RDD[_]]
     try {
@@ -16,8 +15,9 @@ object EventLogParser {
           case ReportException(exception) => {}
           case ReportRDDCreation(rdd) =>
             println("Read an RDD creation: %s".format(rdd))
-            rdd.setContext(sc)
-            rdds += rdd
+            rdds += rdd.setContext(sc)
+          case ReportParallelCollectionCreation(data, numSlices) =>
+            rdds += new ParallelCollection(sc, data, numSlices)
           case ReportRDDChecksum(rdd, split, checksum) => {}
         }
       }

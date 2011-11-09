@@ -110,4 +110,7 @@ extends RDD[(K, V)](sc) {
   }
   
   override val dependencies: List[Dependency[_]] = Nil
+
+  override def setContext(newContext: SparkContext): HadoopRDD[K, V] =
+    new HadoopRDD(newContext, conf, inputFormatClass, keyClass, valueClass, minSplits)
 }

@@ -20,7 +20,7 @@ extends Split with Serializable {
 }
 
 class ParallelCollection[T: ClassManifest](
-  sc: SparkContext, @transient data: Seq[T], numSlices: Int)
+  sc: SparkContext, @transient val data: Seq[T], val numSlices: Int)
 extends RDD[T](sc) {
   // TODO: Right now, each split sends along its full data, even if later down
   // the RDD chain it gets cached. It might be worthwhile to write the data to
@@ -38,6 +38,9 @@ extends RDD[T](sc) {
   override def preferredLocations(s: Split): Seq[String] = Nil
   
   override val dependencies: List[Dependency[_]] = Nil
+
+  override def setContext(newContext: SparkContext): ParallelCollection[T] =
+    new ParallelCollection(newContext, data, numSlices)
 }
 
 private object ParallelCollection {

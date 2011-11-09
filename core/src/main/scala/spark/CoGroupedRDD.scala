@@ -89,4 +89,7 @@ extends RDD[(K, Seq[Seq[_]])](rdds.head.context) with Logging {
     }
     map.iterator
   }
+
+  override def setContext(newContext: SparkContext): CoGroupedRDD[K] =
+    new CoGroupedRDD(rdds.map(_.setContext(newContext)), part)
 }

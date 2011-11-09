@@ -38,4 +38,7 @@ extends RDD[(K, C)](parent.context) {
     fetcher.fetch[K, C](dep.shuffleId, split.index, mergePair)
     combiners.iterator
   }
+
+  override def setContext(newContext: SparkContext): ShuffledRDD[K, V, C] =
+    new ShuffledRDD(parent.setContext(newContext), aggregator, part)
 }
