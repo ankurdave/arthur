@@ -11,6 +11,7 @@ import java.util.Date
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.Map
 import scala.collection.mutable.HashMap
+import scala.collection.mutable.Queue
 
 import org.apache.hadoop.io.BytesWritable
 import org.apache.hadoop.io.NullWritable
@@ -44,7 +45,7 @@ import SparkContext._
  * In addition, PairRDDFunctions contains extra methods available on RDDs of key-value pairs,
  * and SequenceFileRDDFunctions contains extra methods for saving RDDs to Hadoop SequenceFiles.
  */
-abstract class RDD[T: ClassManifest](@transient sc: SparkContext) extends Serializable {
+abstract class RDD[T: ClassManifest](@transient var sc: SparkContext) extends Serializable {
   // Methods that must be implemented by subclasses
   def splits: Array[Split]
   def compute(split: Split): Iterator[T]
@@ -192,6 +193,19 @@ abstract class RDD[T: ClassManifest](@transient sc: SparkContext) extends Serial
 
   def saveAsObjectFile(path: String) {
     this.glom.map(x => (NullWritable.get(), new BytesWritable(Utils.serialize(x)))).saveAsSequenceFile(path)
+  }
+
+  /**
+   * Recursively sets the SparkContext for this RDD and its dependencies.
+   */
+  def setContext(newContext: SparkContext) {
+    val rdds = new Queue[RDD[_]]
+    rdds += this
+    while (rdds.nonEmpty) {
+      val r = rdds.dequeue()
+      r.sc = newContext
+      rdds ++= r.dependencies.map(_.rdd)
+    }
   }
 }
 

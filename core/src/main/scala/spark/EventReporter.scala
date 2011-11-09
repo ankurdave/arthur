@@ -4,7 +4,7 @@ import akka.actor.Actor
 import akka.actor.Actor._
 import akka.actor.ActorRef
 import akka.dispatch.MessageDispatcher
-import java.io.{FileOutputStream, FileNotFoundException}
+import java.io._
 
 sealed trait EventReporterMessage
 case class ReportException(exception: Throwable) extends EventReporterMessage
@@ -16,7 +16,13 @@ class EventReporterActor(dispatcher: MessageDispatcher) extends Actor with Loggi
 
   val eventLog =
     try {
-      Some(new FileOutputStream(System.getProperty("spark.logging.eventLog"), true))
+      val file = new File(System.getProperty("spark.logging.eventLog"))
+      if (!file.exists) {
+        Some(new ObjectOutputStream(new FileOutputStream(file)))
+      } else {
+        logWarning("Event log %s already exists".format(System.getProperty("spark.logging.eventLog")))
+        None
+      }
     } catch {
       case e: FileNotFoundException =>
         logWarning("Can't write to %s: %s".format(System.getProperty("spark.logging.eventLog"), e))
@@ -24,17 +30,8 @@ class EventReporterActor(dispatcher: MessageDispatcher) extends Actor with Loggi
     }
 
   def receive = {
-    case ReportException(exception) =>
-      logInfo("Received exception: %s".format(exception))
-
-    case ReportRDDCreation(rdd) =>
-      for (l <- eventLog) {
-        // TODO: avoid serializing the same RDD once for each time it's referenced as a dependency
-        l.write(Utils.serialize(rdd))
-      }
-
-    case ReportRDDChecksum(rdd, split, checksum) =>
-      logInfo("Received checksum for split %d of RDD %s: %d".format(split.index, rdd.id, checksum))
+    case msg: EventReporterMessage =>
+      for (l <- eventLog) l.writeObject(msg)
   }
 }
 
