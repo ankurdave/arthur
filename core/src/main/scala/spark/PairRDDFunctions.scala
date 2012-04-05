@@ -416,6 +416,15 @@ class FlatMappedValuesRDD[K, V, U](prev: RDD[(K, V)], f: V => Traversable[U])
       case (k, v) => f(v).map(x => (k, x))
     }.iterator
   }
+  override def tagged(tagger: RDDTagger): RDD[Tagged[(K, U)]] = {
+    val taggedPrev: RDD[(K, Tagged[V])] =
+      tagger(prev).map { case Tagged((k, v), tag) => (k, Tagged(v, tag)) }
+    val fmv: RDD[(K, Tagged[U])] =
+      new FlatMappedValuesRDD(taggedPrev, (tv: Tagged[V]) => tv match {
+        case Tagged(v, tag) => f(v).map(u => Tagged(u, tag))
+      })
+    fmv.map { case (k, Tagged(u, tag)) => Tagged((k, u), tag) }
+  }
   reportCreation()
 }
 
