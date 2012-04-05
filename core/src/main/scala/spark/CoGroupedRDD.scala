@@ -43,6 +43,22 @@ class CoGroupedRDD[K](rdds: Seq[RDD[(_, _)]], part: Partitioner)
   }
 
   override def mapDependencies(g: RDD ~> RDD) = new CoGroupedRDD(rdds.map(rdd => g(rdd)), part)
+
+  override def tagged(tagger: RDDTagger): RDD[Tagged[(K, Seq[Seq[_]])]] = {
+    val taggedRDDs: Seq[RDD[(Any, Tagged[Any])]] =
+      rdds.map(rdd => tagger(rdd).map {
+        case Tagged((k, v), tag) => (k, Tagged(v, tag))
+      })
+    val cogrouped: RDD[(K, Seq[Seq[Tagged[_]]])] =
+      (new CoGroupedRDD(taggedRDDs.asInstanceOf[Seq[RDD[(_, _)]]], part)
+       .asInstanceOf[RDD[(K, Seq[Seq[Tagged[_]]])]])
+    cogrouped.map {
+      case (k, seqSeqTagged) =>
+        val tag = (for (seqTagged <- seqSeqTagged; tagged <- seqTagged) yield tagged.tag).reduce(_ || _)
+        val untaggedValues = seqSeqTagged.map(seqTagged => seqTagged.map(tagged => tagged.elem))
+        Tagged((k, untaggedValues), tag)
+    }
+  }
   
   @transient
   private var splits_ : Array[Split] = {

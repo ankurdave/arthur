@@ -46,6 +46,9 @@ class ParallelCollection[T: ClassManifest](
 
   override def mapDependencies(g: RDD ~> RDD) = this
 
+  override def tagged(tagger: RDDTagger) =
+    this.map(t => Tagged(t, false))
+
   private def writeObject(stream: java.io.ObjectOutputStream) {
     stream.defaultWriteObject()
     stream match {

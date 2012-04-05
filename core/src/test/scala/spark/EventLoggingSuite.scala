@@ -212,6 +212,71 @@ class EventLoggingSuite extends FunSuite {
     assert(failures(1).isInstanceOf[ReduceAssertionFailure])
   }
 
+  test("forward tracing") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make an RDD and transform it
+    val sc = makeSparkContext(eventLog)
+    sc.makeRDD(List(1, 2, 3, 4, 5, 6)).map(_ - 1).flatMap(x => List.tabulate(x) { i => x }).filter(_ % 2 == 0).collect()
+    sc.stop()
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val startRDD = r.rdds(1).asInstanceOf[RDD[Int]]
+    val endRDD = r.rdds(3).asInstanceOf[RDD[Int]]
+    val descendantsOf4 = r.traceForward(startRDD, 4, endRDD).collect()
+    assert(descendantsOf4 === Array(4, 4, 4, 4))
+    val descendantsOf5 = r.traceForward(startRDD, 5, endRDD).collect()
+    assert(descendantsOf5 === Array())
+    sc2.stop()
+  }
+
+  test("forward tracing on CoGroupedRDD") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make a CoGroupedRDD and transform it
+    val sc = makeSparkContext(eventLog)
+    val rdd0 = sc.makeRDD(List((1, 2), (3, 4), (5, 6)))
+    val rdd1 = sc.makeRDD(List((1, 1), (3, 3), (6, 6)))
+    val cogrouped = rdd0.groupWith(rdd1)
+    cogrouped.collect()
+    sc.stop()
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val descendantsOf12 = r.traceForward(rdd0, (1, 2), cogrouped).collect()
+    assert(descendantsOf12 === Array((1, (List(2), List(1)))))
+    val descendantsOf66 = r.traceForward(rdd1, (6, 6), cogrouped).collect()
+    assert(descendantsOf66 === Array((6, (List(), List(6)))))
+    sc2.stop()
+  }
+
+  test("forward tracing on SortedRDD") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make a CoGroupedRDD and transform it
+    val sc = makeSparkContext(eventLog)
+    val rdd = sc.makeRDD(List((3, 1), (2, 1), (1, 1)))
+    val sorted = rdd.sortByKey()
+    sorted.collect()
+    sc.stop()
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val descendantsOf31 = r.traceForward(rdd, (3, 1), sorted).collect()
+    assert(descendantsOf31 === Array((3, 1)))
+    sc2.stop()
+  }
+
   test("disable Arthur") {
     // Initialize event log
     val tempDir = Files.createTempDir()

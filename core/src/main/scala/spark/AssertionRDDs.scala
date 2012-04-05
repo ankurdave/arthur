@@ -19,6 +19,10 @@ class ElementAssertionRDD[T: ClassManifest](
     }
   }
   override def mapDependencies(g: RDD ~> RDD) = new ElementAssertionRDD(g(prev), elementAssertion)
+  override def tagged(tagger: RDDTagger) =
+    new ElementAssertionRDD(
+      tagger(prev),
+      (tt: Tagged[T], split: Split) => elementAssertion(tt.elem, split))
 
   reportCreation()
 }
@@ -36,6 +40,12 @@ class ReduceAssertionRDD[T: ClassManifest](
   override val dependencies = List(new OneToOneDependency(prev))
   override def compute(split: Split) = new ReducingIterator(prev.iterator(split), split)
   override def mapDependencies(g: RDD ~> RDD) = new ReduceAssertionRDD(g(prev), reducer, assertion)
+  override def tagged(tagger: RDDTagger) =
+    new ReduceAssertionRDD(
+      tagger(prev),
+      (tta: Tagged[T], ttb: Tagged[T]) =>
+        Tagged(reducer(tta.elem, ttb.elem), tta.tag || ttb.tag),
+      (tt: Tagged[T], split: Split) => assertion(tt.elem, split))
 
   class ReducingIterator(underlying: Iterator[T], split: Split) extends Iterator[T] {
     def hasNext = underlying.hasNext

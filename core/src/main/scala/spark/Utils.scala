@@ -194,3 +194,7 @@ object Utils {
 trait ~>[F[_],G[_]] {
   def apply[A](a: F[A]): G[A]
 }
+
+trait RDDTagger {
+  def apply[A](a: RDD[A]): RDD[Tagged[A]]
+}

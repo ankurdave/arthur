@@ -55,6 +55,8 @@ abstract class RDD[T: ClassManifest](@transient private var sc: SparkContext) ex
    * it possible to transform the RDD dependency graph.
    */
   def mapDependencies(g: RDD ~> RDD): RDD[T]
+  def tagged(tagger: RDDTagger): RDD[Tagged[T]] =
+    throw new UnsupportedOperationException("not implemented")
 
   // Optionally overridden by subclasses to specify how they are partitioned
   val partitioner: Option[Partitioner] = None
@@ -99,7 +101,7 @@ abstract class RDD[T: ClassManifest](@transient private var sc: SparkContext) ex
       compute(split)
     }
   }
-  
+
   // Transformations (return a new RDD)
   
   def map[U: ClassManifest](f: T => U): RDD[U] = new MappedRDD(this, sc.clean(f))
@@ -300,6 +302,8 @@ class MappedRDD[U: ClassManifest, T: ClassManifest](
   override val dependencies = List(new OneToOneDependency(prev))
   override def mapDependencies(g: RDD ~> RDD) = new MappedRDD(g(prev), f)
   override def compute(split: Split) = prev.iterator(split).map(f)
+  override def tagged(tagger: RDDTagger) =
+    new MappedRDD(tagger(prev), (tt: Tagged[T]) => tt.map(f))
   reportCreation()
 }
 
@@ -312,6 +316,8 @@ class FlatMappedRDD[U: ClassManifest, T: ClassManifest](
   override val dependencies = List(new OneToOneDependency(prev))
   override def mapDependencies(g: RDD ~> RDD) = new FlatMappedRDD(g(prev), f)
   override def compute(split: Split) = prev.iterator(split).flatMap(f)
+  override def tagged(tagger: RDDTagger) =
+    new FlatMappedRDD(tagger(prev), (tt: Tagged[T]) => tt.flatMap(f))
   reportCreation()
 }
 
@@ -320,6 +326,8 @@ class FilteredRDD[T: ClassManifest](prev: RDD[T], f: T => Boolean) extends RDD[T
   override val dependencies = List(new OneToOneDependency(prev))
   override def mapDependencies(g: RDD ~> RDD) = new FilteredRDD(g(prev), f)
   override def compute(split: Split) = prev.iterator(split).filter(f)
+  override def tagged(tagger: RDDTagger) =
+    new FilteredRDD(tagger(prev), (tt: Tagged[T]) => f(tt.elem))
   reportCreation()
 }
 
@@ -328,6 +336,13 @@ class GlommedRDD[T: ClassManifest](prev: RDD[T]) extends RDD[Array[T]](prev.cont
   override val dependencies = List(new OneToOneDependency(prev))
   override def mapDependencies(g: RDD ~> RDD) = new GlommedRDD(g(prev))
   override def compute(split: Split) = Array(prev.iterator(split).toArray).iterator
+  override def tagged(tagger: RDDTagger) =
+    new MapPartitionsRDD(tagger(prev), (iter: Iterator[Tagged[T]]) => {
+      val array = iter.toArray
+      val elems = array.map(_.elem)
+      val tag = array.map(_.tag).reduce(_ || _)
+      Array(Tagged(elems, tag)).iterator
+    })
   reportCreation()
 }
 
@@ -340,5 +355,12 @@ class MapPartitionsRDD[U: ClassManifest, T: ClassManifest](
   override val dependencies = List(new OneToOneDependency(prev))
   override def mapDependencies(g: RDD ~> RDD) = new MapPartitionsRDD(g(prev), f)
   override def compute(split: Split) = f(prev.iterator(split))
+  override def tagged(tagger: RDDTagger) =
+    new MapPartitionsRDD(tagger(prev), (iter: Iterator[Tagged[T]]) => {
+      val array = iter.toArray
+      val mappedArray = f(array.map(_.elem).iterator)
+      val tag = array.map(_.tag).reduce(_ || _)
+      mappedArray.map(elem => Tagged(elem, tag))
+    })
   reportCreation()
 }

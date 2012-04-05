@@ -47,6 +47,11 @@ class CartesianRDD[T: ClassManifest, U:ClassManifest](
 
   override def mapDependencies(g: RDD ~> RDD) = new CartesianRDD(context, g(rdd1), g(rdd2))
 
+  override def tagged(tagger: RDDTagger) =
+    new CartesianRDD(sc, tagger(rdd1), tagger(rdd2)).map {
+      case (tt, tu) => Tagged((tt.elem, tu.elem), tt.tag || tu.tag)
+    }
+
   private def writeObject(stream: java.io.ObjectOutputStream) {
     stream.defaultWriteObject()
     stream match {

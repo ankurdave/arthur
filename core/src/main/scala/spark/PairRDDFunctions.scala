@@ -370,6 +370,10 @@ class OrderedRDDFunctions[K <% Ordered[K]: ClassManifest, V: ClassManifest](
   }
 }
 
+case class OrderedTagged[A <% Ordered[A]](val elem: A, val tag: Boolean) extends Ordered[OrderedTagged[A]] {
+  def compare(that: OrderedTagged[A]) = this.elem.compare(that.elem)
+}
+
 class SortedRDD[K <% Ordered[K], V](prev: RDD[(K, V)], ascending: Boolean)
   extends RDD[(K, V)](prev.context) {
 
@@ -377,6 +381,11 @@ class SortedRDD[K <% Ordered[K], V](prev: RDD[(K, V)], ascending: Boolean)
   override val partitioner = prev.partitioner
   override val dependencies = List(new OneToOneDependency(prev))
   override def mapDependencies(g: RDD ~> RDD) = new SortedRDD(g(prev), ascending)
+  override def tagged(tagger: RDDTagger): RDD[Tagged[(K, V)]] = {
+    val taggedPrev = tagger(prev).map { case Tagged((k, v), tag) => (OrderedTagged(k, tag), v) }
+    val sorted = new SortedRDD(taggedPrev, ascending)
+    sorted.map { case (OrderedTagged(k, tag), v) => Tagged((k, v), tag) }
+  }
   override def compute(split: Split) = {
     prev.iterator(split).toArray
       .sortWith((x, y) => if (ascending) x._1 < y._1 else x._1 > y._1).iterator
@@ -390,6 +399,8 @@ class MappedValuesRDD[K, V, U](prev: RDD[(K, V)], f: V => U) extends RDD[(K, U)]
   override def mapDependencies(g: RDD ~> RDD) = new MappedValuesRDD(g(prev), f)
   override val partitioner = prev.partitioner
   override def compute(split: Split) = prev.iterator(split).map{case (k, v) => (k, f(v))}
+  override def tagged(tagger: RDDTagger): RDD[Tagged[(K, U)]] =
+    tagger(prev).map { case Tagged((k, v), tag) => Tagged((k, f(v)), tag) }
   reportCreation()
 }
 

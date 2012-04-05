@@ -123,6 +123,26 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
     newRDD
   }
 
+
+  def traceForward[T: ClassManifest, U: ClassManifest](startRDD: RDD[T], element: T, endRDD: RDD[U]): RDD[U] = {
+    // Tag all RDDs
+    val rddId = startRDD.id
+    val taggedRDDs = new mutable.ArrayBuffer[RDD[Tagged[_]]]
+    for (rdd <- _rdds) {
+      var taggedRDD = rdd.tagged(new RDDTagger {
+        def apply[A](prev: RDD[A]): RDD[Tagged[A]] = {
+          taggedRDDs(prev.id).asInstanceOf[RDD[Tagged[A]]]
+        }
+      })
+      if (rdd.id == startRDD.id) {
+        taggedRDD = taggedRDD.map(t => if (t.elem == element) Tagged(t.elem, true) else t)
+      }
+      taggedRDDs += taggedRDD.asInstanceOf[RDD[Tagged[_]]]
+    }
+
+    taggedRDDs(endRDD.id).asInstanceOf[RDD[Tagged[U]]].filter(t => t.tag).map(t => t.elem)
+  }
+
   /**
    * Runs the specified task locally in a new JVM with the given options, and blocks until the task
    * has completed. While the task is running, it takes over the input and output streams.
