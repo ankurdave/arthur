@@ -277,6 +277,48 @@ class EventLoggingSuite extends FunSuite {
     sc2.stop()
   }
 
+  test("forward tracing on (Flat)MappedValuesRDD") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make a MappedValuesRDD and a FlatMappedValuesRDD
+    val sc = makeSparkContext(eventLog)
+    val rdd = sc.makeRDD(List((3, 1), (2, 2), (1, 1)))
+    val fmv = rdd.mapValues(v => v + 1).flatMapValues(v => List.tabulate(v) { i => v })
+    fmv.collect()
+    sc.stop()
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val descendantsOf22 = r.traceForward(rdd, (2, 2), fmv).collect()
+    assert(descendantsOf22 === Array((2, 3), (2, 3), (2, 3)))
+    sc2.stop()
+  }
+
+  test("forward tracing on ShuffledRDD") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make a ShuffledRDD
+    val sc = makeSparkContext(eventLog)
+    val rdd = sc.makeRDD(List((3, 1), (2, 2), (1, 1), (1, 2)))
+    val shuffled = rdd.reduceByKey(_ + _, 4)
+    shuffled.collect()
+    sc.stop()
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val descendantsOf11 = r.traceForward(rdd, (1, 1), shuffled).collect()
+    assert(descendantsOf11 === Array((1, 3)))
+    val descendantsOf12 = r.traceForward(rdd, (1, 2), shuffled).collect()
+    assert(descendantsOf12 === Array((1, 3)))
+    sc2.stop()
+  }
+
   test("disable Arthur") {
     // Initialize event log
     val tempDir = Files.createTempDir()
