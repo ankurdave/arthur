@@ -48,7 +48,7 @@ class UnionRDD[T: ClassManifest](
   override def mapDependencies(g: RDD ~> RDD) = new UnionRDD(context, rdds.map(rdd => g(rdd)))
 
   override def tagged(tagger: RDDTagger) =
-    new UnionRDD(sc, rdds.map(rdd => tagger(rdd)))
+    new UnionRDD(context, rdds.map(rdd => tagger(rdd)))
 
   override def preferredLocations(s: Split): Seq[String] =
     s.asInstanceOf[UnionSplit[T]].preferredLocations()
