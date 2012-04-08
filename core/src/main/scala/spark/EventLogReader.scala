@@ -123,25 +123,27 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
     newRDD
   }
 
-
-  def traceForward[T: ClassManifest, U: ClassManifest](startRDD: RDD[T], element: T, endRDD: RDD[U]): RDD[U] = {
+  def traceForward[T: ClassManifest, U: ClassManifest](startRDD: RDD[T], p: T => Boolean, endRDD: RDD[U]): RDD[U] = {
     // Tag all RDDs
     val rddId = startRDD.id
     val taggedRDDs = new mutable.ArrayBuffer[RDD[Tagged[_]]]
     for (rdd <- _rdds) {
       var taggedRDD = rdd.tagged(new RDDTagger {
-        def apply[A](prev: RDD[A]): RDD[Tagged[A]] = {
+        def apply[A](prev: RDD[A]): RDD[Tagged[A]] =
           taggedRDDs(prev.id).asInstanceOf[RDD[Tagged[A]]]
-        }
       })
       if (rdd.id == startRDD.id) {
-        taggedRDD = taggedRDD.map(t => if (t.elem == element) Tagged(t.elem, true) else t)
+        val taggedStartRDD = taggedRDD.asInstanceOf[RDD[Tagged[T]]]
+        taggedRDD = taggedStartRDD.map(tt => Tagged(tt.elem, p(tt.elem)))
       }
       taggedRDDs += taggedRDD.asInstanceOf[RDD[Tagged[_]]]
     }
 
-    taggedRDDs(endRDD.id).asInstanceOf[RDD[Tagged[U]]].filter(t => t.tag).map(t => t.elem)
+    taggedRDDs(endRDD.id).asInstanceOf[RDD[Tagged[U]]].filter(tu => tu.tag).map(tu => tu.elem)
   }
+
+  def traceForward[T: ClassManifest, U: ClassManifest](startRDD: RDD[T], elem: T, endRDD: RDD[U]): RDD[U] =
+    traceForward(startRDD, { (x: T) => x == elem }, endRDD)
 
   /**
    * Runs the specified task locally in a new JVM with the given options, and blocks until the task
