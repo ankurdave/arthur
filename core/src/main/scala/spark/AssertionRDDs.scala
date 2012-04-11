@@ -44,7 +44,7 @@ class ReduceAssertionRDD[T: ClassManifest](
     new ReduceAssertionRDD(
       tagger(prev),
       (tta: Tagged[T], ttb: Tagged[T]) =>
-        Tagged(reducer(tta.elem, ttb.elem), tta.tag || ttb.tag),
+        Tagged(reducer(tta.elem, ttb.elem), tta.tag | ttb.tag),
       (tt: Tagged[T], split: Split) => assertion(tt.elem, split))
 
   class ReducingIterator(underlying: Iterator[T], split: Split) extends Iterator[T] {

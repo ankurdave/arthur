@@ -54,7 +54,7 @@ class CoGroupedRDD[K](rdds: Seq[RDD[(_, _)]], part: Partitioner)
        .asInstanceOf[RDD[(K, Seq[Seq[Tagged[_]]])]])
     cogrouped.map {
       case (k, seqSeqTagged) =>
-        val tag = (for (seqTagged <- seqSeqTagged; tagged <- seqTagged) yield tagged.tag).reduce(_ || _)
+        val tag = (for (seqTagged <- seqSeqTagged; tagged <- seqTagged) yield tagged.tag).reduce(_ | _)
         val untaggedValues = seqSeqTagged.map(seqTagged => seqTagged.map(tagged => tagged.elem))
         Tagged((k, untaggedValues), tag)
     }

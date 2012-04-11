@@ -13,6 +13,8 @@ import org.apache.hadoop.mapreduce.TaskAttemptID
 import java.util.Date
 import java.text.SimpleDateFormat
 
+import scala.collection.immutable
+
 class NewHadoopSplit(rddId: Int, val index: Int, @transient rawSplit: InputSplit with Writable)
   extends Split {
   
@@ -94,7 +96,7 @@ class NewHadoopRDD[K, V](
   override def mapDependencies(g: RDD ~> RDD) = this
 
   override def tagged(tagger: RDDTagger) =
-    this.map(t => Tagged(t, false))
+    this.map(t => Tagged(t, new immutable.HashSet()))
 
   private def writeObject(stream: java.io.ObjectOutputStream) {
     stream.defaultWriteObject()

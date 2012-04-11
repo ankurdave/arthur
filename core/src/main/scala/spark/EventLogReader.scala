@@ -3,7 +3,9 @@ package spark
 import com.google.common.io.Files
 import java.io._
 import scala.collection.JavaConversions._
+import scala.collection.immutable
 import scala.collection.mutable
+import scala.util.Random
 
 /**
  * Reads events from an event log on disk and processes them.
@@ -132,18 +134,50 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
         def apply[A](prev: RDD[A]): RDD[Tagged[A]] =
           taggedRDDs(prev.id).asInstanceOf[RDD[Tagged[A]]]
       })
+      // Set the tag for the appropriate elements on the start RDD
       if (rdd.id == startRDD.id) {
         val taggedStartRDD = taggedRDD.asInstanceOf[RDD[Tagged[T]]]
-        taggedRDD = taggedStartRDD.map(tt => Tagged(tt.elem, p(tt.elem)))
+        taggedRDD = taggedStartRDD.map { tt =>
+          val tagBoolean = p(tt.elem)
+          if (tagBoolean) {
+            val rand = new Random
+            val tag = immutable.HashSet(rand.nextInt(Int.MaxValue))
+            Tagged(tt.elem, tag)
+          } else {
+            Tagged(tt.elem, immutable.HashSet())
+          }
+        }
       }
       taggedRDDs += taggedRDD.asInstanceOf[RDD[Tagged[_]]]
     }
 
-    taggedRDDs(endRDD.id).asInstanceOf[RDD[Tagged[U]]].filter(tu => tu.tag).map(tu => tu.elem)
+    taggedRDDs(endRDD.id).asInstanceOf[RDD[Tagged[U]]].filter(tu => tu.tag.nonEmpty).map(tu => tu.elem)
   }
 
   def traceForward[T: ClassManifest, U: ClassManifest](startRDD: RDD[T], elem: T, endRDD: RDD[U]): RDD[U] =
     traceForward(startRDD, { (x: T) => x == elem }, endRDD)
+
+  def traceBackward[T: ClassManifest, U: ClassManifest](startRDD: RDD[T], p: U => Boolean, endRDD: RDD[U]): RDD[T] = {
+    rddPath(startRDD, endRDD) match {
+      case Some(rddsOnPath) => 
+        // For each RDD working backwards, tag its parent, find which
+        // elements of the current RDD are tagged, and repeat with the
+        // elements in the parent that contributed those tags. If the RDD
+        // is the start RDD, return it
+        val taggedRDDs = tagAllRDDs()
+        val (_, taggedElementsInStartRDD) = rddsOnPath.foldLeft((endRDD, endRDD.filter(p))) {
+          case ((childRDD, taggedElements), parentRDD) =>
+            val taggedParent = taggedRDDs(parentRDD.id).tagAll()
+            val taggedChild = childRDD.tagged(replaceParent(parentRDD, taggedParent))
+            val tagsOfTaggedElements = taggedChild join taggedElements // for each element in taggedElements, find it in taggedChild, and extract its tag
+            val taggedElementsInParent = tagsOfTaggedElements join taggedParent // for each tag in tagsOfTaggedElements, find the element with that tag in taggedParent, and extract its element
+            (parentRDD, taggedElementsInParent)
+        }
+        taggedElementsInStartRDD
+      case None => throw new UnsupportedOperationException(
+        "RDD %d is not an ancestor of RDD %d".format(startRDD.id, endRDD.id))
+    }
+  }
 
   /**
    * Runs the specified task locally in a new JVM with the given options, and blocks until the task

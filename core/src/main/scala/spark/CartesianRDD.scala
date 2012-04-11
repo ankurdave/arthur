@@ -49,7 +49,7 @@ class CartesianRDD[T: ClassManifest, U:ClassManifest](
 
   override def tagged(tagger: RDDTagger) =
     new CartesianRDD(sc, tagger(rdd1), tagger(rdd2)).map {
-      case (tt, tu) => Tagged((tt.elem, tu.elem), tt.tag || tu.tag)
+      case (tt, tu) => Tagged((tt.elem, tu.elem), tt.tag | tu.tag)
     }
 
   private def writeObject(stream: java.io.ObjectOutputStream) {

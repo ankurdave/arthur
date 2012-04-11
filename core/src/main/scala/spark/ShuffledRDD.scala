@@ -33,8 +33,8 @@ class ShuffledRDD[K, V, C](
     }
     val tagAggregator: Aggregator[K, Tagged[V], Tagged[C]] = new Aggregator(
       { case Tagged(v, tag) => Tagged(aggregator.createCombiner(v), tag) },
-      { case (Tagged(c, cTag), Tagged(v, vTag)) => Tagged(aggregator.mergeValue(c, v), cTag || vTag) },
-      { case (Tagged(c1, c1Tag), Tagged(c2, c2Tag)) => Tagged(aggregator.mergeCombiners(c1, c2), c1Tag || c2Tag) })
+      { case (Tagged(c, cTag), Tagged(v, vTag)) => Tagged(aggregator.mergeValue(c, v), cTag | vTag) },
+      { case (Tagged(c1, c1Tag), Tagged(c2, c2Tag)) => Tagged(aggregator.mergeCombiners(c1, c2), c1Tag | c2Tag) })
     val shuffled: RDD[(K, Tagged[C])] = new ShuffledRDD(taggedParent, tagAggregator, part)
     shuffled.map {case (k, Tagged(c, tag)) => Tagged((k, c), tag)}
   }

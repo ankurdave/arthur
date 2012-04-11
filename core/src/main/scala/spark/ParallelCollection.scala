@@ -1,5 +1,6 @@
 package spark
 
+import scala.collection.immutable
 import scala.collection.immutable.NumericRange
 import scala.collection.mutable.ArrayBuffer
 
@@ -47,7 +48,7 @@ class ParallelCollection[T: ClassManifest](
   override def mapDependencies(g: RDD ~> RDD) = this
 
   override def tagged(tagger: RDDTagger) =
-    this.map(t => Tagged(t, false))
+    this.map(t => Tagged(t, immutable.HashSet()))
 
   private def writeObject(stream: java.io.ObjectOutputStream) {
     stream.defaultWriteObject()

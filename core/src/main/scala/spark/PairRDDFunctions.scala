@@ -370,10 +370,6 @@ class OrderedRDDFunctions[K <% Ordered[K]: ClassManifest, V: ClassManifest](
   }
 }
 
-case class OrderedTagged[A <% Ordered[A]](val elem: A, val tag: Boolean) extends Ordered[OrderedTagged[A]] {
-  def compare(that: OrderedTagged[A]) = this.elem.compare(that.elem)
-}
-
 class SortedRDD[K <% Ordered[K], V](prev: RDD[(K, V)], ascending: Boolean)
   extends RDD[(K, V)](prev.context) {
 

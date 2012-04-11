@@ -340,7 +340,7 @@ class GlommedRDD[T: ClassManifest](prev: RDD[T]) extends RDD[Array[T]](prev.cont
     new MapPartitionsRDD(tagger(prev), (iter: Iterator[Tagged[T]]) => {
       val array = iter.toArray
       val elems = array.map(_.elem)
-      val tag = array.map(_.tag).reduce(_ || _)
+      val tag = array.map(_.tag).reduce(_ | _)
       Array(Tagged(elems, tag)).iterator
     })
   reportCreation()
@@ -359,7 +359,7 @@ class MapPartitionsRDD[U: ClassManifest, T: ClassManifest](
     new MapPartitionsRDD(tagger(prev), (iter: Iterator[Tagged[T]]) => {
       val array = iter.toArray
       val mappedArray = f(array.map(_.elem).iterator)
-      val tag = array.map(_.tag).reduce(_ || _)
+      val tag = array.map(_.tag).reduce(_ | _)
       mappedArray.map(elem => Tagged(elem, tag))
     })
   reportCreation()
