@@ -5,7 +5,9 @@ import java.io._
 import scala.collection.JavaConversions._
 import scala.collection.immutable
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
+import spark.SparkContext._
 
 /**
  * Reads events from an event log on disk and processes them.
@@ -16,9 +18,9 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
     file = new File(elp)
     if file.exists
   } yield new EventLogInputStream(new FileInputStream(file), sc)
-  val events = new mutable.ArrayBuffer[EventLogEntry]
+  val events = new ArrayBuffer[EventLogEntry]
   /** List of RDDs indexed by their canonical ID. */
-  private val _rdds = new mutable.ArrayBuffer[RDD[_]]
+  private val _rdds = new ArrayBuffer[RDD[_]]
   /** Map of RDD ID to canonical RDD ID (reverse of _rdds). */
   private val rddIdToCanonical = new mutable.HashMap[Int, Int]
   loadNewEvents()
@@ -125,58 +127,97 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
     newRDD
   }
 
-  def traceForward[T: ClassManifest, U: ClassManifest](startRDD: RDD[T], p: T => Boolean, endRDD: RDD[U]): RDD[U] = {
-    // Tag all RDDs
-    val rddId = startRDD.id
-    val taggedRDDs = new mutable.ArrayBuffer[RDD[Tagged[_]]]
-    for (rdd <- _rdds) {
-      var taggedRDD = rdd.tagged(new RDDTagger {
-        def apply[A](prev: RDD[A]): RDD[Tagged[A]] =
-          taggedRDDs(prev.id).asInstanceOf[RDD[Tagged[A]]]
-      })
-      // Set the tag for the appropriate elements on the start RDD
-      if (rdd.id == startRDD.id) {
-        val taggedStartRDD = taggedRDD.asInstanceOf[RDD[Tagged[T]]]
-        taggedRDD = taggedStartRDD.map { tt =>
-          val tagBoolean = p(tt.elem)
-          if (tagBoolean) {
-            val rand = new Random
-            val tag = immutable.HashSet(rand.nextInt(Int.MaxValue))
-            Tagged(tt.elem, tag)
-          } else {
-            Tagged(tt.elem, immutable.HashSet())
-          }
-        }
+  def traceForward[T, U: ClassManifest](startRDD: RDD[T], p: T => Boolean, endRDD: RDD[U]): RDD[U] = {
+    val taggedRDDs = tagAllRDDs { (origRDD, taggedRDD) =>
+      if (origRDD.id == startRDD.id) {
+        tagElements(taggedRDD.asInstanceOf[RDD[Tagged[T]]], p).asInstanceOf[RDD[Tagged[_]]]
+      } else {
+        taggedRDD
       }
-      taggedRDDs += taggedRDD.asInstanceOf[RDD[Tagged[_]]]
     }
 
     taggedRDDs(endRDD.id).asInstanceOf[RDD[Tagged[U]]].filter(tu => tu.tag.nonEmpty).map(tu => tu.elem)
   }
 
-  def traceForward[T: ClassManifest, U: ClassManifest](startRDD: RDD[T], elem: T, endRDD: RDD[U]): RDD[U] =
+  def traceForward[T, U: ClassManifest](startRDD: RDD[T], elem: T, endRDD: RDD[U]): RDD[U] =
     traceForward(startRDD, { (x: T) => x == elem }, endRDD)
 
-  def traceBackward[T: ClassManifest, U: ClassManifest](startRDD: RDD[T], p: U => Boolean, endRDD: RDD[U]): RDD[T] = {
+  def traceBackward[T, U: ClassManifest](startRDD: RDD[T], p: U => Boolean, endRDD: RDD[U]): RDD[T] = {
     rddPath(startRDD, endRDD) match {
       case Some(rddsOnPath) => 
         // For each RDD working backwards, tag its parent, find which
         // elements of the current RDD are tagged, and repeat with the
         // elements in the parent that contributed those tags. If the RDD
         // is the start RDD, return it
-        val taggedRDDs = tagAllRDDs()
-        val (_, taggedElementsInStartRDD) = rddsOnPath.foldLeft((endRDD, endRDD.filter(p))) {
+        val taggedRDDs = tagAllRDDs((origRDD, taggedRDD) => taggedRDD)
+        type Wildcard = A forSome { type A }
+        val z = (endRDD.asInstanceOf[RDD[Wildcard]], endRDD.filter(p).asInstanceOf[RDD[Wildcard]])
+        val (_, taggedElementsInStartRDD) = rddsOnPath.foldLeft(z) {
           case ((childRDD, taggedElements), parentRDD) =>
-            val taggedParent = taggedRDDs(parentRDD.id).tagAll()
-            val taggedChild = childRDD.tagged(replaceParent(parentRDD, taggedParent))
-            val tagsOfTaggedElements = taggedChild join taggedElements // for each element in taggedElements, find it in taggedChild, and extract its tag
-            val taggedElementsInParent = tagsOfTaggedElements join taggedParent // for each tag in tagsOfTaggedElements, find the element with that tag in taggedParent, and extract its element
-            (parentRDD, taggedElementsInParent)
+            val taggedParent = tagElements(taggedRDDs(parentRDD.id).asInstanceOf[RDD[Tagged[Wildcard]]], (elem: Wildcard) => true)
+            val taggedChild = childRDD.tagged(replaceParent(parentRDD.asInstanceOf[RDD[Wildcard]], taggedParent, taggedRDDs))
+
+            // For each element in taggedElements, find it in taggedChild, and extract its tag
+            val a = taggedChild.map(taggedElem => (taggedElem.elem, taggedElem.tag))
+            val b = taggedElements.map(elem => (elem, null))
+            val tagsOfTaggedElements = new PairRDDFunctions(a).join(b).map { case (_, (tag, null)) => tag }
+
+            // For each tag in tagsOfTaggedElements, find the element with that tag in taggedParent, and extract its element
+            val c = taggedParent.map(tagged => (tagged.tag, tagged.elem))
+            val d = tagsOfTaggedElements.map(tag => (tag, null))
+            val taggedElementsInParent = c.join(d).map { case (_, (elem, null)) => elem }
+
+            (parentRDD.asInstanceOf[RDD[Wildcard]], taggedElementsInParent)
         }
-        taggedElementsInStartRDD
+        taggedElementsInStartRDD.asInstanceOf[RDD[T]]
       case None => throw new UnsupportedOperationException(
         "RDD %d is not an ancestor of RDD %d".format(startRDD.id, endRDD.id))
     }
+  }
+
+  private def replaceParent[T](a: RDD[T], b: RDD[Tagged[T]], taggedRDDs: ArrayBuffer[RDD[Tagged[_]]]) = new RDDTagger {
+    def apply[A](prev: RDD[A]): RDD[Tagged[A]] =
+      if (prev.id == a.id) b.asInstanceOf[RDD[Tagged[A]]]
+      else taggedRDDs(prev.id).asInstanceOf[RDD[Tagged[A]]]
+  }
+
+  private def tagElements[T](rdd: RDD[Tagged[T]], p: T => Boolean): RDD[Tagged[T]] = {
+    rdd.map { tt =>
+      val tagBoolean = p(tt.elem)
+      if (tagBoolean) {
+        val rand = new Random
+        val tag = immutable.HashSet(rand.nextInt(Int.MaxValue))
+        Tagged(tt.elem, tag)
+      } else {
+        Tagged(tt.elem, immutable.HashSet())
+      }
+    }
+  }
+
+  private def rddPath(startRDD: RDD[_], endRDD: RDD[_]): Option[List[RDD[_]]] = {
+    if (startRDD.id == endRDD.id) {
+      Some(List())
+    } else {
+      for (dep <- endRDD.dependencies; rdd = dep.rdd) {
+        rddPath(startRDD, rdd) match {
+          case Some(restOfPath) => return Some(endRDD :: restOfPath)
+          case None => {}
+        }
+      }
+      None
+    }
+  }
+
+  private def tagAllRDDs(f: (RDD[_], RDD[Tagged[_]]) => RDD[Tagged[_]]): ArrayBuffer[RDD[Tagged[_]]] = {
+    val taggedRDDs = new ArrayBuffer[RDD[Tagged[_]]]
+    for (rdd <- _rdds) {
+      val taggedRDD = rdd.tagged(new RDDTagger {
+        def apply[A](prev: RDD[A]): RDD[Tagged[A]] =
+          taggedRDDs(prev.id).asInstanceOf[RDD[Tagged[A]]]
+      })
+      taggedRDDs += f(rdd, taggedRDD.asInstanceOf[RDD[Tagged[_]]])
+    }
+    taggedRDDs
   }
 
   /**
@@ -287,7 +328,7 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
   }
 
   /** Replaces rdd with newRDD in the dependency graph. */
-  private def replace[T: ClassManifest](rdd: RDD[T], newRDD: RDD[T]) {
+  private def replace[T](rdd: RDD[T], newRDD: RDD[T]) {
     val canonicalId = rddIdToCanonical(rdd.id)
     _rdds(canonicalId) = newRDD
     rddIdToCanonical(newRDD.id) = canonicalId
