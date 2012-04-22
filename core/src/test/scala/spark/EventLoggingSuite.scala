@@ -1,16 +1,20 @@
 package spark
 
+import com.google.common.io.Files
+
 import java.io.File
 
-import scala.io.Source
-
-import com.google.common.io.Files
-import org.scalatest.FunSuite
 import org.apache.hadoop.io._
 
-import SparkContext._
+import org.scalatest.FunSuite
+import org.scalatest.PrivateMethodTester
 
-class EventLoggingSuite extends FunSuite {
+import scala.collection.mutable.ArrayBuffer
+import scala.io.Source
+
+import spark.SparkContext._
+
+class EventLoggingSuite extends FunSuite with PrivateMethodTester {
   /**
    * Enables event logging for the current SparkEnv without setting spark.arthur.logPath. This is
    * useful for unit tests, where setting a property affects other tests as well.
@@ -212,7 +216,7 @@ class EventLoggingSuite extends FunSuite {
     assert(failures(1).isInstanceOf[ReduceAssertionFailure])
   }
 
-  test("forward tracing") {
+  test("forward tracing (simple)") {
     // Initialize event log
     val tempDir = Files.createTempDir()
     val eventLog = new File(tempDir, "eventLog")
@@ -234,7 +238,7 @@ class EventLoggingSuite extends FunSuite {
     sc2.stop()
   }
 
-  test("forward tracing on CoGroupedRDD") {
+  test("forward tracing (CoGroupedRDD)") {
     // Initialize event log
     val tempDir = Files.createTempDir()
     val eventLog = new File(tempDir, "eventLog")
@@ -250,14 +254,17 @@ class EventLoggingSuite extends FunSuite {
     // Trace some elements and verify the results
     val sc2 = makeSparkContext(eventLog)
     val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
-    val descendantsOf12 = r.traceForward(rdd0, (1, 2), cogrouped).collect()
+    val rdd0New = r.rdds(rdd0.id).asInstanceOf[RDD[(Int, Int)]]
+    val rdd1New = r.rdds(rdd1.id).asInstanceOf[RDD[(Int, Int)]]
+    val cogroupedNew = r.rdds(cogrouped.id).asInstanceOf[RDD[(Int, (Seq[Int], Seq[Int]))]]
+    val descendantsOf12 = r.traceForward(rdd0New, (1, 2), cogroupedNew).collect()
     assert(descendantsOf12 === Array((1, (List(2), List(1)))))
-    val descendantsOf66 = r.traceForward(rdd1, (6, 6), cogrouped).collect()
+    val descendantsOf66 = r.traceForward(rdd1New, (6, 6), cogroupedNew).collect()
     assert(descendantsOf66 === Array((6, (List(), List(6)))))
     sc2.stop()
   }
 
-  test("forward tracing on SortedRDD") {
+  test("forward tracing (SortedRDD)") {
     // Initialize event log
     val tempDir = Files.createTempDir()
     val eventLog = new File(tempDir, "eventLog")
@@ -272,12 +279,14 @@ class EventLoggingSuite extends FunSuite {
     // Trace some elements and verify the results
     val sc2 = makeSparkContext(eventLog)
     val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
-    val descendantsOf31 = r.traceForward(rdd, (3, 1), sorted).collect()
+    val rddNew = r.rdds(rdd.id).asInstanceOf[RDD[(Int, Int)]]
+    val sortedNew = r.rdds(sorted.id).asInstanceOf[RDD[(Int, Int)]]
+    val descendantsOf31 = r.traceForward(rddNew, (3, 1), sortedNew).collect()
     assert(descendantsOf31 === Array((3, 1)))
     sc2.stop()
   }
 
-  test("forward tracing on (Flat)MappedValuesRDD") {
+  test("forward tracing ([Flat]MappedValuesRDD)") {
     // Initialize event log
     val tempDir = Files.createTempDir()
     val eventLog = new File(tempDir, "eventLog")
@@ -292,12 +301,14 @@ class EventLoggingSuite extends FunSuite {
     // Trace some elements and verify the results
     val sc2 = makeSparkContext(eventLog)
     val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
-    val descendantsOf22 = r.traceForward(rdd, (2, 2), fmv).collect()
+    val rddNew = r.rdds(rdd.id).asInstanceOf[RDD[(Int, Int)]]
+    val fmvNew = r.rdds(fmv.id).asInstanceOf[RDD[(Int, Int)]]
+    val descendantsOf22 = r.traceForward(rddNew, (2, 2), fmvNew).collect()
     assert(descendantsOf22 === Array((2, 3), (2, 3), (2, 3)))
     sc2.stop()
   }
 
-  test("forward tracing on ShuffledRDD") {
+  test("forward tracing (ShuffledRDD)") {
     // Initialize event log
     val tempDir = Files.createTempDir()
     val eventLog = new File(tempDir, "eventLog")
@@ -312,10 +323,81 @@ class EventLoggingSuite extends FunSuite {
     // Trace some elements and verify the results
     val sc2 = makeSparkContext(eventLog)
     val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
-    val descendantsOf11 = r.traceForward(rdd, (1, 1), shuffled).collect()
+    val rddNew = r.rdds(rdd.id).asInstanceOf[RDD[(Int, Int)]]
+    val shuffledNew = r.rdds(shuffled.id).asInstanceOf[RDD[(Int, Int)]]
+    val descendantsOf11 = r.traceForward(rddNew, (1, 1), shuffledNew).collect()
     assert(descendantsOf11 === Array((1, 3)))
-    val descendantsOf12 = r.traceForward(rdd, (1, 2), shuffled).collect()
+    val descendantsOf12 = r.traceForward(rddNew, (1, 2), shuffledNew).collect()
     assert(descendantsOf12 === Array((1, 3)))
+    sc2.stop()
+  }
+
+  test("backward tracing (simple)") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make an RDD and transform it
+    val sc = makeSparkContext(eventLog)
+    val rdd0 = sc.makeRDD(List(1, 2, 3, 4, 5, 6))
+    val rdd1 = rdd0.map(_ - 1).flatMap(x => List.tabulate(x) { i => x }).filter(_ % 2 == 0)
+    rdd1.collect()
+    sc.stop()
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val startRDD = r.rdds(rdd0.id).asInstanceOf[RDD[Int]]
+    val endRDD = r.rdds(rdd1.id).asInstanceOf[RDD[Int]]
+    val ancestorsOf4 = r.traceBackward(startRDD, 4, endRDD).asInstanceOf[RDD[Any]].collect()
+    assert(ancestorsOf4.toSet == Set(5))
+    val ancestorsOf5 = r.traceBackward(startRDD, 5, endRDD).asInstanceOf[RDD[Any]].collect()
+    assert(ancestorsOf5 === Array())
+    sc2.stop()
+  }
+
+  test("EventLogReader.rddPath") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make an RDD graph with some forks
+    val sc = makeSparkContext(eventLog)
+    val rdd0 = sc.makeRDD(List((1, 2), (3, 4), (5, 6)))
+    val rdd1 = sc.makeRDD(List((1, 1), (3, 3), (6, 6)))
+    val cogrouped = rdd0.groupWith(rdd1)
+    val mapped1 = rdd1.map(x => 1)
+    val mapped2 = cogrouped.map(x => 1)
+    sc.stop()
+
+    // Get some paths in the RDD graph
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val rddPath = PrivateMethod[Option[List[RDD[_]]]]('rddPath)
+    val path1 = r.invokePrivate(rddPath(rdd0, mapped2)).map(rddList => rddList.map(_.id))
+    assert(path1 === Some(List(mapped2.id, cogrouped.id, cogrouped.id - 1, rdd0.id)))
+    val path2 = r.invokePrivate(rddPath(rdd1, mapped1)).map(rddList => rddList.map(_.id))
+    assert(path2 === Some(List(mapped1.id, rdd1.id)))
+    sc2.stop()
+  }
+
+  test("EventLogReader.tagElements") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make an RDD
+    val sc = makeSparkContext(eventLog)
+    val rdd = sc.makeRDD(List(1, 2, 3))
+    sc.stop()
+
+    // Tag some elements
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val tagElements = PrivateMethod[RDD[Tagged[Int]]]('tagElements)
+    val rdd0 = r.rdds(0).asInstanceOf[RDD[Int]]
+    val tagged = r.invokePrivate(tagElements(rdd0, (x: Int) => x == 2)).filter(tt => tt.tag.nonEmpty).map(tt => tt.elem).collect()
+    assert(tagged === Array(2))
     sc2.stop()
   }
 

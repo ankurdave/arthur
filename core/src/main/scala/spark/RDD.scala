@@ -54,9 +54,10 @@ abstract class RDD[T: ClassManifest](@transient private var sc: SparkContext) ex
    * Returns a new RDD whose parents are the result of applying g to this RDD's parents. This makes
    * it possible to transform the RDD dependency graph.
    */
-  def mapDependencies(g: RDD ~> RDD): RDD[T]
+  def mapDependencies(g: RDD ~> RDD): RDD[T] =
+    throw new UnsupportedOperationException("mapDependencies not implemented")
   def tagged(tagger: RDDTagger): RDD[Tagged[T]] =
-    throw new UnsupportedOperationException("not implemented")
+    throw new UnsupportedOperationException("tagged not implemented")
 
   // Optionally overridden by subclasses to specify how they are partitioned
   val partitioner: Option[Partitioner] = None
