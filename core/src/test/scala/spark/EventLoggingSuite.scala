@@ -349,10 +349,32 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
     val startRDD = r.rdds(rdd0.id).asInstanceOf[RDD[Int]]
     val endRDD = r.rdds(rdd1.id).asInstanceOf[RDD[Int]]
-    val ancestorsOf4 = r.traceBackward(startRDD, 4, endRDD).asInstanceOf[RDD[Any]].collect()
+    val ancestorsOf4 = r.traceBackward(startRDD, 4, endRDD).collect()
     assert(ancestorsOf4.toSet == Set(5))
-    val ancestorsOf5 = r.traceBackward(startRDD, 5, endRDD).asInstanceOf[RDD[Any]].collect()
+    val ancestorsOf5 = r.traceBackward(startRDD, 5, endRDD).collect()
     assert(ancestorsOf5 === Array())
+    sc2.stop()
+  }
+
+  test("backward tracing (ShuffledRDD)") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make a ShuffledRDD
+    val sc = makeSparkContext(eventLog)
+    val rdd = sc.makeRDD(List((3, 1), (2, 2), (1, 1), (1, 2)))
+    val shuffled = rdd.reduceByKey(_ + _, 4)
+    shuffled.collect()
+    sc.stop()
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val rddNew = r.rdds(rdd.id).asInstanceOf[RDD[(Int, Int)]]
+    val shuffledNew = r.rdds(shuffled.id).asInstanceOf[RDD[(Int, Int)]]
+    val ancestorsOf11 = r.traceBackward(rddNew, (1, 3), shuffledNew).collect()
+    assert(ancestorsOf11.toSet === Set((1, 1), (1, 2)))
     sc2.stop()
   }
 

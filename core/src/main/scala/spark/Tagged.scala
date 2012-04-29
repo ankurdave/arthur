@@ -9,6 +9,11 @@ case class Tagged[A](val elem: A, val tag: immutable.HashSet[Int]) {
     for (newElem <- f(elem)) yield Tagged(newElem, tag)
 }
 
+object Tagged {
+  type Tag = Int
+  type TagSet = immutable.HashSet[Tag]
+}
+
 case class OrderedTagged[A <% Ordered[A]](
   val elem: A,
   val tag: immutable.HashSet[Int]
