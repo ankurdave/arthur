@@ -2,7 +2,7 @@ package spark
 
 import scala.collection.immutable
 
-case class Tagged[A](val elem: A, val tag: immutable.HashSet[Int]) {
+case class Tagged[+A](val elem: A, val tag: immutable.HashSet[Int]) {
   def map[B](f: A => B): Tagged[B] = Tagged(f(elem), tag)
 
   def flatMap[B](f: A => Traversable[B]) =
