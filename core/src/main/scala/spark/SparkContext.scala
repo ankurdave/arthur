@@ -323,6 +323,14 @@ class SparkContext(
   private[spark] def newShuffleId(): Int = {
     nextShuffleId.getAndIncrement()
   }
+
+  /** Moves the next shuffle ID so that it will not conflict with the given id. */
+  private[spark] def updateShuffleId(id: Int) {
+    val delta = id - nextShuffleId.get + 1
+    if (delta > 0) {
+      nextShuffleId.addAndGet(delta)
+    }
+  }
   
   private var nextRddId = new AtomicInteger(0)
 

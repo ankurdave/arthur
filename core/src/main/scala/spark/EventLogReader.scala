@@ -331,6 +331,11 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
     event match {
       case RDDCreation(rdd, location) =>
         sc.updateRddId(rdd.id)
+        for (dep <- rdd.dependencies) dep match {
+          case shufDep: ShuffleDependency[_,_,_] =>
+            sc.updateShuffleId(shufDep.shuffleId)
+          case _ => {}
+        }
         _rdds += rdd
         rddIdToCanonical(rdd.id) = rdd.id
       case _ => {}
