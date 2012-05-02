@@ -93,7 +93,7 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     sc2.stop()
   }
 
-  test("set nextRddId after restoring") {
+  test("set nextRddId and nextShuffleId after restoring") {
     // Initialize event log
     val tempDir = Files.createTempDir()
     val eventLog = new File(tempDir, "eventLog")
@@ -101,18 +101,27 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     // Make some RDDs
     val sc = makeSparkContext(eventLog)
     val nums = sc.makeRDD(1 to 4)
-    val numsMapped = nums.map(x => x + 1)
+    val numsMapped = nums.map(x => (x, x + 1))
+    val numsReduced = numsMapped.reduceByKey(_ + _)
     sc.stop()
 
     // Read them back from the event log
     val sc2 = makeSparkContext(eventLog)
     val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
-    assert(r.rdds.length === 2)
 
     // Make a new RDD and check for ID conflicts
-    val nums2 = sc2.makeRDD(1 to 5)
-    assert(nums2.id != r.rdds(0).id)
-    assert(nums2.id != r.rdds(1).id)
+    val nums2 = sc2.makeRDD(Seq((1, 2), (3, 4)))
+    val nums2Reduced = nums2.reduceByKey(_ + _)
+    for (rdd <- r.rdds if rdd.id <= numsReduced.id) {
+      assert(nums2.id != rdd.id)
+      assert(nums2Reduced.id != rdd.id)
+    }
+    for (dep1 <- numsReduced.dependencies; dep2 <- nums2Reduced.dependencies) (dep1, dep2) match {
+      case (a: ShuffleDependency[_,_,_], b: ShuffleDependency[_,_,_]) =>
+        assert(a.shuffleId != b.shuffleId)
+      case _ =>
+        fail()
+    }
     sc2.stop()
   }
 
