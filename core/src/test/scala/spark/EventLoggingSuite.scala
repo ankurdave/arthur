@@ -9,6 +9,7 @@ import org.apache.hadoop.io._
 import org.scalatest.FunSuite
 import org.scalatest.PrivateMethodTester
 
+import scala.collection.immutable.HashSet
 import scala.collection.mutable.ArrayBuffer
 import scala.io.Source
 
@@ -278,7 +279,7 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     val tempDir = Files.createTempDir()
     val eventLog = new File(tempDir, "eventLog")
 
-    // Make a CoGroupedRDD and transform it
+    // Make a SortedRDD and transform it
     val sc = makeSparkContext(eventLog)
     val rdd = sc.makeRDD(List((3, 1), (2, 1), (1, 1)))
     val sorted = rdd.sortByKey()
@@ -385,6 +386,86 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     val ancestorsOf11 = r.traceBackward(rddNew, (1, 3), shuffledNew).collect()
     assert(ancestorsOf11.toSet === Set((1, 1), (1, 2)))
     sc2.stop()
+  }
+
+  test("backward tracing ([Flat]MappedValuesRDD)") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make a MappedValuesRDD and a FlatMappedValuesRDD
+    val sc = makeSparkContext(eventLog)
+    val rdd = sc.makeRDD(List((3, 1), (2, 2), (1, 1)))
+    val fmv = rdd.mapValues(v => v + 1).flatMapValues(v => List.tabulate(v) { i => v })
+    fmv.collect()
+    sc.stop()
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val rddNew = r.rdds(rdd.id).asInstanceOf[RDD[(Int, Int)]]
+    val fmvNew = r.rdds(fmv.id).asInstanceOf[RDD[(Int, Int)]]
+    println(fmvNew.collect.toList)
+    val ancestorsOf23 = r.traceBackward(rddNew, (2, 3), fmvNew).collect()
+    assert(ancestorsOf23.toSet === Set((2, 2)))
+    sc2.stop()
+  }
+
+  test("backward tracing (CoGroupedRDD)") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make a CoGroupedRDD and transform it
+    val sc = makeSparkContext(eventLog)
+    val rdd0 = new ParallelCollection(sc, List((1, 2), (3, 4), (5, 6)), sc.defaultParallelism)
+    val rdd1 = new ParallelCollection(sc, List((1, 1), (3, 3), (6, 6)), sc.defaultParallelism)
+    val cogrouped = rdd0.groupWith(rdd1)
+    sc.stop()
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val rdd0New = r.rdds(rdd0.id).asInstanceOf[RDD[(Int, Int)]]
+    val rdd1New = r.rdds(rdd1.id).asInstanceOf[RDD[(Int, Int)]]
+    val cogroupedNew = r.rdds(cogrouped.id).asInstanceOf[RDD[(Int, (Seq[Int], Seq[Int]))]]
+    cogroupedNew.collect()
+    val result = r.traceBackward(rdd0New, (1, (Seq(2), Seq(1))), cogroupedNew).collect()
+    assert(result.toSet === Set((1, 2)))
+    sc2.stop()
+  }
+
+  test("CoGroupedRDD.tagged") {
+    // Make a CoGroupedRDD
+    val sc = makeSparkContextWithoutEventLogging()
+    val rdd0 = new ParallelCollection(sc, List((1, 2), (3, 4), (5, 6)), sc.defaultParallelism)
+    val rdd1 = new ParallelCollection(sc, List((1, 1), (3, 3), (6, 6)), sc.defaultParallelism)
+    val cogrouped = new CoGroupedRDD[Int, Int](
+      Seq(rdd0, rdd1), new HashPartitioner(sc.defaultParallelism))
+    println(cogrouped.collect.toList)
+    assert(cogrouped.collect.toSet === Set(
+      (1,Seq(ArrayBuffer(2),ArrayBuffer(1))),
+      (3,Seq(ArrayBuffer(4),ArrayBuffer(3))),
+      (5,Seq(ArrayBuffer(6),ArrayBuffer( ))),
+      (6,Seq(ArrayBuffer( ),ArrayBuffer(6)))
+    ))
+
+    // Tag the CoGroupedRDD
+    val nullTagger = new RDDTagger { def apply[A](prev: RDD[A]) = throw new UnsupportedOperationException() }
+    val tagged = cogrouped.tagged(new RDDTagger {
+      def apply[A](prev: RDD[A]): RDD[Tagged[A]] = {
+        (if (prev.id == rdd0.id) rdd0 else rdd1).tagged(nullTagger).asInstanceOf[RDD[Tagged[A]]]
+      }
+    })
+    println(tagged.collect.toList)
+    assert(tagged.collect.toSet === Set(
+      Tagged((1,Seq(ArrayBuffer(2),ArrayBuffer(1))), HashSet[Int]()),
+      Tagged((3,Seq(ArrayBuffer(4),ArrayBuffer(3))), HashSet[Int]()),
+      Tagged((5,Seq(ArrayBuffer(6),ArrayBuffer( ))), HashSet[Int]()),
+      Tagged((6,Seq(ArrayBuffer( ),ArrayBuffer(6))), HashSet[Int]())
+    ))
+
+    sc.stop()
   }
 
   test("EventLogReader.rddPath") {
