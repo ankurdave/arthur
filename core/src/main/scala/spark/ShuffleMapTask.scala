@@ -25,7 +25,8 @@ class ShuffleMapTask(
     val partitioner = dep.partitioner.asInstanceOf[Partitioner]
     val buckets = Array.tabulate(numOutputSplits)(_ => new JHashMap[Any, Any])
     for (elem <- rdd.iterator(split)) {
-      val (k, v) = elem.asInstanceOf[(Any, Any)]
+      val pair = elem.asInstanceOf[Product2[Any, Any]]
+      val (k, v) = (pair._1, pair._2)
       var bucketId = partitioner.getPartition(k)
       val bucket = buckets(bucketId)
       var existing = bucket.get(k)
