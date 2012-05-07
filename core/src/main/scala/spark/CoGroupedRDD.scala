@@ -44,17 +44,17 @@ class CoGroupedRDD[K, V](rdds: Seq[RDD[(K, V1)] forSome { type V1 <: V }], part:
 
   override def tagged(tagger: RDDTagger): RDD[Tagged[(K, Seq[Seq[V1] forSome { type V1 <: V }])]] = {
     val taggedRDDs: Seq[RDD[(K, Tagged[V1])] forSome { type V1 <: V }] =
-      rdds.map(rdd => tagger(rdd).map {
+      rdds.map(rdd => new SamePartitionMappedRDD(tagger(rdd), (tp: Tagged[(K, V1)] forSome { type V1 <: V }) => tp match {
         case Tagged((k, v), tag) => (k, Tagged(v, tag))
-      })
+      }))
     val cogrouped: RDD[(K, Seq[Seq[Tagged[V1]] forSome { type V1 <: V }])] =
       new CoGroupedRDD[K, Tagged[V]](taggedRDDs, part)
-    cogrouped.map {
+    new SamePartitionMappedRDD(cogrouped, (pair: (K, Seq[Seq[Tagged[V1]] forSome { type V1 <: V }])) => pair match {
       case (k, seqSeqTagged) =>
         val tag = (for (seqTagged <- seqSeqTagged; tagged <- seqTagged) yield tagged.tag).reduce(_ | _)
         val untaggedValues = seqSeqTagged.map(seqTagged => seqTagged.map(tagged => tagged.elem))
         Tagged((k, untaggedValues), tag)
-    }
+    })
   }
   
   @transient
