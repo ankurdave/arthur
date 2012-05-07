@@ -393,7 +393,9 @@ class MappedValuesRDD[K, V, U](prev: RDD[(K, V)], f: V => U) extends RDD[(K, U)]
   override val partitioner = prev.partitioner
   override def compute(split: Split) = prev.iterator(split).map{case (k, v) => (k, f(v))}
   override def tagged(tagger: RDDTagger): RDD[Tagged[(K, U)]] =
-    tagger(prev).map { case Tagged((k, v), tag) => Tagged((k, f(v)), tag) }
+    new SamePartitionMappedRDD(tagger(prev), (tp: Tagged[(K, V)]) => tp match {
+      case Tagged((k, v), tag) => Tagged((k, f(v)), tag)
+    })
   reportCreation()
 }
 
@@ -411,12 +413,16 @@ class FlatMappedValuesRDD[K, V, U](prev: RDD[(K, V)], f: V => Traversable[U])
   }
   override def tagged(tagger: RDDTagger): RDD[Tagged[(K, U)]] = {
     val taggedPrev: RDD[(K, Tagged[V])] =
-      tagger(prev).map { case Tagged((k, v), tag) => (k, Tagged(v, tag)) }
+      new SamePartitionMappedRDD(tagger(prev), (tp: Tagged[(K, V)]) => tp match {
+        case Tagged((k, v), tag) => (k, Tagged(v, tag))
+      })
     val fmv: RDD[(K, Tagged[U])] =
       new FlatMappedValuesRDD(taggedPrev, (tv: Tagged[V]) => tv match {
         case Tagged(v, tag) => f(v).map(u => Tagged(u, tag))
       })
-    fmv.map { case (k, Tagged(u, tag)) => Tagged((k, u), tag) }
+    new SamePartitionMappedRDD(fmv, (pair: (K, Tagged[U])) => pair match {
+      case (k, Tagged(u, tag)) => Tagged((k, u), tag)
+    })
   }
   reportCreation()
 }
