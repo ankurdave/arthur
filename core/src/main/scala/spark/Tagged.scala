@@ -1,8 +1,6 @@
 package spark
 
-import scala.collection.immutable
-
-case class Tagged[+A](val elem: A, val tag: immutable.HashSet[Int]) extends Product2[Any, Any] {
+case class Tagged[+A](val elem: A, val tag: Tagged.TagSet) extends Product2[Any, Any] {
   def map[B](f: A => B): Tagged[B] = Tagged(f(elem), tag)
 
   def flatMap[B](f: A => Traversable[B]) =
@@ -21,12 +19,14 @@ case class Tagged[+A](val elem: A, val tag: immutable.HashSet[Int]) extends Prod
 
 object Tagged {
   type Tag = Int
-  type TagSet = immutable.HashSet[Tag]
+  type TagSet = BloomSet[Int]
+
+  def TagSet(elems: Tag*) = BloomSet(elems: _*)
 }
 
 case class OrderedTagged[A <% Ordered[A]](
   val elem: A,
-  val tag: immutable.HashSet[Int]
+  val tag: Tagged.TagSet
 ) extends Ordered[OrderedTagged[A]] {
   def compare(that: OrderedTagged[A]) = this.elem.compare(that.elem)
 }
@@ -39,7 +39,7 @@ class UniquelyTaggedRDD[T](prev: RDD[T]) extends RDD[Tagged[T]](prev.context) {
     val tagRangeLength = Int.MaxValue / numSplits
     val startTag = tagRangeLength * split.index
     prev.iterator(split).zipWithIndex.map {
-      case (elem, i) => Tagged(elem, immutable.HashSet(startTag + i))
+      case (elem, i) => Tagged(elem, Tagged.TagSet(startTag + i))
     }
   }
 

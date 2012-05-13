@@ -458,12 +458,13 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
       }
     })
     println(tagged.collect.toList)
-    assert(tagged.collect.toSet === Set(
-      Tagged((1,Seq(ArrayBuffer(2),ArrayBuffer(1))), HashSet[Int]()),
-      Tagged((3,Seq(ArrayBuffer(4),ArrayBuffer(3))), HashSet[Int]()),
-      Tagged((5,Seq(ArrayBuffer(6),ArrayBuffer( ))), HashSet[Int]()),
-      Tagged((6,Seq(ArrayBuffer( ),ArrayBuffer(6))), HashSet[Int]())
+    assert(tagged.collect.map(_.elem).toSet === Set(
+      (1,Seq(ArrayBuffer(2),ArrayBuffer(1))),
+      (3,Seq(ArrayBuffer(4),ArrayBuffer(3))),
+      (5,Seq(ArrayBuffer(6),ArrayBuffer( ))),
+      (6,Seq(ArrayBuffer( ),ArrayBuffer(6)))
     ))
+    assert(tagged.collect.forall(!_.tag.nonEmpty))
 
     sc.stop()
   }

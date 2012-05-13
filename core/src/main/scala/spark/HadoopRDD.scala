@@ -15,8 +15,6 @@ import org.apache.hadoop.mapred.RecordReader
 import org.apache.hadoop.mapred.Reporter
 import org.apache.hadoop.util.ReflectionUtils
 
-import scala.collection.immutable
-
 /** 
  * A Spark split class that wraps around a Hadoop InputSplit.
  */
@@ -116,7 +114,7 @@ class HadoopRDD[K, V](
   override def mapDependencies(g: RDD ~> RDD) = this
 
   override def tagged(tagger: RDDTagger) =
-    this.map(t => Tagged(t, immutable.HashSet()))
+    this.map(t => Tagged(t, Tagged.TagSet()))
 
   private def writeObject(stream: java.io.ObjectOutputStream) {
     stream.defaultWriteObject()
