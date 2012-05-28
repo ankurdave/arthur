@@ -151,19 +151,8 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
         else taggedRDD
     }
     val taggedEndRDD = taggedRDDs(endRDD.id).asInstanceOf[RDD[Tagged[U]]]
-
-    // For each element in elementsInEndRDD, find it in taggedEndRDD, and extract its tag
-    val tags: RDD[Tag] = taggedEndRDD.flatMap {
-      taggedElem =>
-        if (p(taggedElem.elem)) taggedElem.tag
-        else Seq()
-    }
-
-    // For each tag in tags, find the element with that tag in taggedStartRDD, and extract its element
-    val c: RDD[(Tag, Some[T])] = taggedStartRDD.flatMap(tagged => for (tag <- tagged.tag) yield (tag, Some(tagged.elem)))
-    val d: RDD[(Tag, Null)] = tags.map(tag => (tag, null))
-    val elementsInStartRDD: RDD[T] = c.join(d).map { case (_, (Some(elem), _)) => elem }
-    elementsInStartRDD
+    val tags = sc.broadcast(taggedEndRDD.filter(tu => p(tu.elem)).map(tu => tu.tag).fold(immutable.HashSet[Int]())(_ union _))
+    taggedStartRDD.filter(tt => (tags.value intersect tt.tag).nonEmpty).map(tt => tt.elem)
   }
 
   def traceBackward[T: ClassManifest, U: ClassManifest](startRDD: RDD[T], elem: U, endRDD: RDD[U]): RDD[T] =

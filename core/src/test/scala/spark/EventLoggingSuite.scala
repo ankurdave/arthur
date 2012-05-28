@@ -360,7 +360,7 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     val startRDD = r.rdds(rdd0.id).asInstanceOf[RDD[Int]]
     val endRDD = r.rdds(rdd1.id).asInstanceOf[RDD[Int]]
     val ancestorsOf4 = r.traceBackward(startRDD, 4, endRDD).collect()
-    assert(ancestorsOf4.toSet == Set(5))
+    assert(ancestorsOf4.toSet === Set(5))
     val ancestorsOf5 = r.traceBackward(startRDD, 5, endRDD).collect()
     assert(ancestorsOf5 === Array())
     sc2.stop()
