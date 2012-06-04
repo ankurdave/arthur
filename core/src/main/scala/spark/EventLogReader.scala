@@ -143,49 +143,85 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
   def traceForward[T, U: ClassManifest](startRDD: RDD[T], elem: T, endRDD: RDD[U]): RDD[U] =
     traceForward(startRDD, { (x: T) => x == elem }, endRDD)
 
-  def traceBackward[T, U: ClassManifest](startRDD: RDD[T], p: U => Boolean, endRDD: RDD[U]): RDD[_] = { // : RDD[T] = {
-    rddPath(startRDD, endRDD) match {
-      case Some(_ :: rddsOnPath) =>
-        // For each RDD working backwards, tag its parent, find which
-        // elements of the current RDD are tagged, and repeat with the
-        // elements in the parent that contributed those tags. If the RDD
-        // is the start RDD, return it
-        val taggedRDDs: Seq[RDD[Tagged[_]]] = tagAllRDDs((origRDD, taggedRDD) => taggedRDD)
-        val z: (RDD[_], RDD[_]) = (endRDD, endRDD.filter(p))
-        def f[A: ClassManifest, B: ClassManifest](acc: (RDD[_], RDD[_]), parentRDDUntyped: RDD[_]): (RDD[B], RDD[B]) = {
+  def traceBackward[T, U: ClassManifest](startRDD: RDD[T], p: U => Boolean, endRDD: RDD[U]): Seq[_] = { // : RDD[T] = {
+    stagePath(startRDD, endRDD) match {
+      case Some(rddsOnPath) if rddsOnPath.tail.nonEmpty =>
+        val initialRDD = endRDD
+        val initialTaggedElements = endRDD.filter(p).collect
+        val initialPartitionsWithTaggedElements = sc.runJob(
+          initialRDD,
+          (taskContext: TaskContext, iter: Iterator[U]) =>
+            (for (elem <- iter; if p(elem)) yield taskContext.splitId).toIterable.headOption
+        ).flatten
+        val z: (RDD[_], Seq[_], Seq[Int]) = (
+          initialRDD,
+          initialTaggedElements,
+          initialPartitionsWithTaggedElements
+        )
+        def f[A: ClassManifest, B: ClassManifest](
+            acc: (RDD[_], Seq[_], Seq[Int]),
+            rddUntyped: RDD[_]
+        ): (RDD[B], Seq[B], Seq[Int]) = {
           val childRDD: RDD[A] = acc._1.asInstanceOf[RDD[A]]
-          val taggedElements: RDD[A] = acc._2.asInstanceOf[RDD[A]]
-          val parentRDD: RDD[B] = parentRDDUntyped.asInstanceOf[RDD[B]]
-          val taggedParent: RDD[Tagged[B]] = new UniquelyTaggedRDD(parentRDD)
-          val taggedChild: RDD[Tagged[A]] = childRDD.tagged(replaceParent(parentRDD, taggedParent, taggedRDDs))
+          val taggedElements: Seq[A] = acc._2.asInstanceOf[Seq[A]]
+          val partitionsWithTaggedElements: Seq[Int] = acc._3
+          val rdd: RDD[B] = rddUntyped.asInstanceOf[RDD[B]]
 
-          // For each element in taggedElements, find it in taggedChild, and extract its tag
-          val a: RDD[(A, TagSet)] = taggedChild.map(taggedElem => (taggedElem.elem, taggedElem.tag))
-          val b: RDD[(A, Null)] = taggedElements.map(elem => (elem, null))
-          val tagsOfTaggedElements: RDD[Int] = new PairRDDFunctions(a).join(b).flatMap { case (_, (tag, null)) => tag }
+          val taggedRDD: RDD[Tagged[B]] = new UniquelyTaggedRDD(rdd)
+          val taggedChildRDD: RDD[Tagged[A]] = childRDD.tagged(replaceParent(rdd, taggedRDD))
 
-          // For each tag in tagsOfTaggedElements, find the element with that tag in taggedParent, and extract its element
-          val c: RDD[(Tag, Some[B])] = taggedParent.flatMap(tagged => for (tag <- tagged.tag) yield (tag, Some(tagged.elem)))
-          val d: RDD[(Tag, Null)] = tagsOfTaggedElements.map(tag => (tag, null))
-          val taggedElementsInParent: RDD[B] = c.join(d).map { case (_, (Some(elem), _)) => elem }
+          val taggedElementsBroadcast = sc.broadcast(taggedElements)
+          val tags = taggedChildRDD.filter(ta => taggedElementsBroadcast.value.contains(ta.elem)).map(ta => ta.tag)
+          val tagsLocal = sc.broadcast(sc.runJob[collection.immutable.HashSet[Int], Option[collection.immutable.HashSet[Int]]](tags, (iter: Iterator[collection.immutable.HashSet[Int]]) => {
+            if (iter.hasNext) {
+              Some(iter.reduceLeft(_ | _))
+            } else {
+              None
+            }
+          }, partitionsWithTaggedElements, true).collect { case Some(x) => x }.foldLeft(collection.immutable.HashSet[Int]()) { _ | _ })
 
-          (parentRDD, taggedElementsInParent)
+          val taggedElementsInRDD = taggedRDD.filter(tb => tagsLocal.value.intersect(tb.tag).nonEmpty).map(tb => tb.elem)
+          val inputPartitionsWithTaggedElements: Set[Int] =
+            (for {
+              dep <- childRDD.dependencies
+              shufDep <- dep match {
+                case shufDep: ShuffleDependency[_,_,_] => List(shufDep)
+                case _ => List()
+              }
+              splitIndex <- partitionsWithTaggedElements
+            } yield {
+              val fetcher = new BackwardTracingShuffleFetcher
+              var inputPartitions: List[Int] = List()
+              fetcher.fetch[Any, Any](shufDep.shuffleId, splitIndex, {
+                (i: Int, k: Any, v: Any) =>
+                  if (taggedElementsBroadcast.value.asInstanceOf[Seq[(Any, Any)]].exists(pair => k == pair._1)) {
+                    inputPartitions = i :: inputPartitions
+                  }
+              })
+              inputPartitions
+            }).flatten.toSet
+          val taggedElementsInRDDLocal = Array.concat(sc.runJob(taggedElementsInRDD, (iter: Iterator[B]) => iter.toArray, inputPartitionsWithTaggedElements.toSeq, true): _*)
+
+          (rdd, taggedElementsInRDDLocal, inputPartitionsWithTaggedElements.toSeq)
         }
-        val (_, taggedElementsInStartRDD: RDD[_]) = rddsOnPath.foldLeft(z)(f)
+        val (_, taggedElementsInStartRDD: Seq[_], _) = rddsOnPath.foldLeft(z)(f)
         taggedElementsInStartRDD
-      case Some(Nil) => throw new UnsupportedOperationException("startRDD and endRDD are the same")
+      case Some(_ :: Nil) =>
+        endRDD.filter(p).collect
+      case Some(Nil) =>
+        throw new Exception("expected at least one RDD in rddsOnPath")
       case None => throw new UnsupportedOperationException(
         "RDD %d is not an ancestor of RDD %d".format(startRDD.id, endRDD.id))
     }
   }
 
-  def traceBackward[T, U: ClassManifest](startRDD: RDD[T], elem: U, endRDD: RDD[U]): RDD[_] =
+  def traceBackward[T, U: ClassManifest](startRDD: RDD[T], elem: U, endRDD: RDD[U]): Seq[_] =
     traceBackward(startRDD, { (x: U) => x == elem }, endRDD)
 
-  private def replaceParent[T](a: RDD[T], b: RDD[Tagged[T]], taggedRDDs: Seq[RDD[Tagged[_]]]) = new RDDTagger {
+  private def replaceParent[T](a: RDD[T], b: RDD[Tagged[T]]) = new RDDTagger {
     def apply[A](prev: RDD[A]): RDD[Tagged[A]] =
       if (prev.id == a.id) b.asInstanceOf[RDD[Tagged[A]]]
-      else taggedRDDs(prev.id).asInstanceOf[RDD[Tagged[A]]]
+      else prev.map(a => Tagged(a, scala.collection.immutable.HashSet[Int]()))
   }
 
   private def tagElements[T](rdd: RDD[T], p: T => Boolean): RDD[Tagged[T]] = {
@@ -205,6 +241,32 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
         }
       }
       None
+    }
+  }
+
+  private def stagePath(startRDD: RDD[_], endRDD: RDD[_]): Option[List[RDD[_]]] = {
+    rddPath(startRDD, endRDD) match {
+      case Some(rddsOnPath) if rddsOnPath.nonEmpty =>
+        val stageRDDs = new ArrayBuffer[RDD[_]]
+        stageRDDs += rddsOnPath.head
+        val rdds = rddsOnPath.init
+        val parentRDDs = rddsOnPath.tail
+        for ((rdd, parentRDD) <- rdds.zip(parentRDDs)) {
+          for (dep <- rdd.dependencies if dep.rdd.id == parentRDD.id) {
+            dep match {
+              case shufDep: ShuffleDependency[_,_,_] =>
+                if (!stageRDDs.lastOption.exists(_ == rdd)) {
+                  stageRDDs += rdd
+                }
+              case _ => {}
+            }
+          }
+        }
+        Some(stageRDDs.toList)
+      case Some(Nil) =>
+        Some(Nil)
+      case None =>
+        None
     }
   }
 
@@ -383,6 +445,8 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
     visit(rdd)
     ancestorDeps.toList
   }
+
+  
 
 
   private def firstExternalElement(location: Array[StackTraceElement]) =

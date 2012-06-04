@@ -359,9 +359,9 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
     val startRDD = r.rdds(rdd0.id).asInstanceOf[RDD[Int]]
     val endRDD = r.rdds(rdd1.id).asInstanceOf[RDD[Int]]
-    val ancestorsOf4 = r.traceBackward(startRDD, 4, endRDD).collect()
-    assert(ancestorsOf4.toSet == Set(5))
-    val ancestorsOf5 = r.traceBackward(startRDD, 5, endRDD).collect()
+    val ancestorsOf4 = r.traceBackward(startRDD, 4, endRDD)
+    assert(ancestorsOf4.toSet === Set(5))
+    val ancestorsOf5 = r.traceBackward(startRDD, 5, endRDD)
     assert(ancestorsOf5 === Array())
     sc2.stop()
   }
@@ -383,7 +383,7 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
     val rddNew = r.rdds(rdd.id).asInstanceOf[RDD[(Int, Int)]]
     val shuffledNew = r.rdds(shuffled.id).asInstanceOf[RDD[(Int, Int)]]
-    val ancestorsOf11 = r.traceBackward(rddNew, (1, 3), shuffledNew).collect()
+    val ancestorsOf11 = r.traceBackward(rddNew, (1, 3), shuffledNew)
     assert(ancestorsOf11.toSet === Set((1, 1), (1, 2)))
     sc2.stop()
   }
@@ -406,7 +406,7 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     val rddNew = r.rdds(rdd.id).asInstanceOf[RDD[(Int, Int)]]
     val fmvNew = r.rdds(fmv.id).asInstanceOf[RDD[(Int, Int)]]
     println(fmvNew.collect.toList)
-    val ancestorsOf23 = r.traceBackward(rddNew, (2, 3), fmvNew).collect()
+    val ancestorsOf23 = r.traceBackward(rddNew, (2, 3), fmvNew)
     assert(ancestorsOf23.toSet === Set((2, 2)))
     sc2.stop()
   }
@@ -430,9 +430,80 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     val rdd1New = r.rdds(rdd1.id).asInstanceOf[RDD[(Int, Int)]]
     val cogroupedNew = r.rdds(cogrouped.id).asInstanceOf[RDD[(Int, (Seq[Int], Seq[Int]))]]
     cogroupedNew.collect()
-    val result = r.traceBackward(rdd0New, (1, (Seq(2), Seq(1))), cogroupedNew).collect()
+    val result = r.traceBackward(rdd0New, (1, (Seq(2), Seq(1))), cogroupedNew)
     assert(result.toSet === Set((1, 2)))
     sc2.stop()
+  }
+
+  test("backward trace single task") {
+    val sc = makeSparkContextWithoutEventLogging()
+    val rdd = sc.makeRDD(List((3, 1), (2, 2), (1, 1), (1, 2)), 4)
+    val shuffled = rdd.reduceByKey(_ + _, 4)
+
+    val taggedElements = Set((1, 3))
+    val childRDD = shuffled
+    val partitionsWithTaggedElements: Seq[Int] = sc.runJob(
+      childRDD,
+      (taskContext: TaskContext, iter: Iterator[(Int, Int)]) => (for (elem <- iter; if elem == (1, 3)) yield taskContext.splitId).toIterable.headOption
+    ).flatten
+    println("partitionsWithTaggedElements: %s".format(partitionsWithTaggedElements))
+    assert(partitionsWithTaggedElements.size === 1)
+
+//    val rdd: RDD[B] = rdd.asInstanceOf[RDD[B]]
+
+    def replaceParent[T](a: RDD[T], b: RDD[Tagged[T]]) = new RDDTagger {
+      def apply[A](prev: RDD[A]): RDD[Tagged[A]] =
+        if (prev.id == a.id) b.asInstanceOf[RDD[Tagged[A]]]
+        else prev.map(a => Tagged(a, scala.collection.immutable.HashSet[Int]()))
+    }
+
+    for (dep <- childRDD.dependencies; shufDep <- dep match {
+      case shufDep: ShuffleDependency[_,_,_] => Some(shufDep)
+      case _ => None
+    }) {
+      new DummyShuffledRDD(shufDep).foreach(x => {})
+    }
+
+    val inputPartitionsWithTaggedElements: Set[Int] =
+      (for {
+        dep <- childRDD.dependencies
+        shufDep <- dep match {
+          case shufDep: ShuffleDependency[_,_,_] => List(shufDep)
+          case _ => List()
+        }
+        splitIndex <- partitionsWithTaggedElements
+       } yield {
+        val fetcher = new BackwardTracingShuffleFetcher
+        var inputPartitions: List[Int] = List()
+        fetcher.fetch[Int, Int](shufDep.shuffleId, splitIndex, {
+          (i: Int, k: Int, v: Int) =>
+            if (k == 1) {
+              inputPartitions = i :: inputPartitions
+            }
+        })
+        inputPartitions
+      }).flatten.toSet
+    println("inputPartitionsWithTaggedElements: %s".format(inputPartitionsWithTaggedElements))
+    assert(inputPartitionsWithTaggedElements.size === 2)
+
+    val taggedRDD = new UniquelyTaggedRDD(rdd)
+    val taggedChildRDD = childRDD.tagged(replaceParent(rdd, taggedRDD))
+    val elements = sc.broadcast(taggedElements)
+    val tags = taggedChildRDD.filter(ta => elements.value.contains(ta.elem)).map(ta => ta.tag)
+    val tagsLocal = sc.broadcast(sc.runJob[collection.immutable.HashSet[Int], Option[collection.immutable.HashSet[Int]]](tags, (iter: Iterator[collection.immutable.HashSet[Int]]) => {
+        if (iter.hasNext) {
+          Some(iter.reduceLeft(_ | _))
+        } else {
+          None
+        }
+    }, partitionsWithTaggedElements, true).collect { case Some(x) => x }.foldLeft(collection.immutable.HashSet[Int]()) { _ | _ })
+    val elementsInRDD = taggedRDD.filter(tb => tagsLocal.value.intersect(tb.tag).nonEmpty).map(tb => tb.elem)
+    val elementsInRDDLocal = Array.concat(sc.runJob(elementsInRDD, (iter: Iterator[(Int, Int)]) => iter.toArray, inputPartitionsWithTaggedElements.toSeq, true): _*)
+    assert(elementsInRDDLocal.toSet === Set((1,1), (1,2)))
+
+    // val elements = sc.broadcast(taggedElements)
+    // val tags = sc.broadcast(taggedChildRDD.filter(ta => elements.value.contains(ta.elem)).map(ta => ta.tag).reduce(_ || _))
+    // val elementsInRDD: RDD[B] = taggedRDD.filter(tb => tags.value.contains(tb.tag)).map(tb => tb.elem)
   }
 
   test("CoGroupedRDD.tagged") {
@@ -490,6 +561,31 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     assert(path1 === Some(List(mapped2.id, cogrouped.id, cogrouped.id - 1, rdd0.id)))
     val path2 = r.invokePrivate(rddPath(rdd1, mapped1)).map(rddList => rddList.map(_.id))
     assert(path2 === Some(List(mapped1.id, rdd1.id)))
+    sc2.stop()
+  }
+
+  test("EventLogReader.stagePath") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make an RDD graph with some forks
+    val sc = makeSparkContext(eventLog)
+    val rdd0 = sc.makeRDD(List((1, 2), (3, 4), (5, 6)))
+    val rdd1 = sc.makeRDD(List((1, 1), (3, 3), (6, 6)))
+    val cogrouped = rdd0.groupWith(rdd1)
+    val mapped1 = rdd1.map(x => 1)
+    val mapped2 = cogrouped.map(x => 1)
+    sc.stop()
+
+    // Get some paths in the RDD graph
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val rddPath = PrivateMethod[Option[List[RDD[_]]]]('stagePath)
+    val path1 = r.invokePrivate(rddPath(rdd0, mapped2)).map(rddList => rddList.map(_.id))
+    assert(path1 === Some(List(mapped2.id, cogrouped.id - 1)))
+    val path2 = r.invokePrivate(rddPath(rdd1, mapped1)).map(rddList => rddList.map(_.id))
+    assert(path2 === Some(List(mapped1.id)))
     sc2.stop()
   }
 
