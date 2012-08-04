@@ -2,6 +2,7 @@ package spark
 
 import akka.actor.ActorSystem
 
+import spark.debugger.EventReporter
 import spark.storage.BlockManager
 import spark.storage.BlockManagerMaster
 import spark.network.ConnectionManager
@@ -17,12 +18,14 @@ class SparkEnv (
     val shuffleFetcher: ShuffleFetcher,
     val shuffleManager: ShuffleManager,
     val blockManager: BlockManager,
-    val connectionManager: ConnectionManager
+    val connectionManager: ConnectionManager,
+    val eventReporter: EventReporter
   ) {
 
   /** No-parameter constructor for unit tests. */
   def this() = {
-    this(null, null, new JavaSerializer, new JavaSerializer, null, null, null, null, null, null)
+    this(null, null, new JavaSerializer, new JavaSerializer, null, null, null, null, null, null,
+      null)
   }
 
   def stop() {
@@ -66,9 +69,11 @@ object SparkEnv {
     val serializerClass = System.getProperty("spark.serializer", "spark.KryoSerializer")
     val serializer = Class.forName(serializerClass).newInstance().asInstanceOf[Serializer]
     
+    val eventReporter = new EventReporter(actorSystem, isMaster)
+
     val blockManagerMaster = new BlockManagerMaster(actorSystem, isMaster, isLocal)
 
-    val blockManager = new BlockManager(blockManagerMaster, serializer)
+    val blockManager = new BlockManager(blockManagerMaster, serializer, eventReporter)
     
     val connectionManager = blockManager.connectionManager 
     
@@ -120,6 +125,7 @@ object SparkEnv {
       shuffleFetcher,
       shuffleManager,
       blockManager,
-      connectionManager)
+      connectionManager,
+      eventReporter)
   }
 }

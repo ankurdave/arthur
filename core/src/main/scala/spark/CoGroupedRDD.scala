@@ -27,7 +27,7 @@ class CoGroupedRDD[K](@transient rdds: Seq[RDD[(_, _)]], part: Partitioner)
   
   val aggr = new CoGroupAggregator
   
-  @transient
+  @transient @LocallyPersistent
   override val dependencies = {
     val deps = new ArrayBuffer[Dependency[_]]
     for ((rdd, index) <- rdds.zipWithIndex) {
@@ -43,7 +43,7 @@ class CoGroupedRDD[K](@transient rdds: Seq[RDD[(_, _)]], part: Partitioner)
     deps.toList
   }
   
-  @transient
+  @transient @LocallyPersistent
   val splits_ : Array[Split] = {
     val firstRdd = rdds.head
     val array = new Array[Split](part.numPartitions)

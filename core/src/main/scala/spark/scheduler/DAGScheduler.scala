@@ -118,6 +118,7 @@ class DAGScheduler(taskSched: TaskScheduler) extends TaskSchedulerListener with 
     // since we can't do it in the RDD constructor because # of splits is unknown
     logInfo("Registering RDD " + rdd.id + ": " + rdd)
     cacheTracker.registerRDD(rdd.id, rdd.splits.size)
+    env.eventReporter.registerRDD(rdd)
     if (shuffleDep != None) {
       mapOutputTracker.registerShuffle(shuffleDep.get.shuffleId, rdd.splits.size)
     }
@@ -367,6 +368,7 @@ class DAGScheduler(taskSched: TaskScheduler) extends TaskSchedulerListener with 
       logDebug("New pending tasks: " + myPending)
       taskSched.submitTasks(
         new TaskSet(tasks.toArray, stage.id, stage.newAttemptId(), stage.priority))
+      SparkEnv.get.eventReporter.reportTaskSubmission(tasks)
     } else {
       logDebug("Stage " + stage + " is actually done; %b %d %d".format(
         stage.isAvailable, stage.numAvailableOutputs, stage.numPartitions))

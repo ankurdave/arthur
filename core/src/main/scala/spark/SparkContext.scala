@@ -398,11 +398,27 @@ class SparkContext(
     nextShuffleId.getAndIncrement()
   }
   
+  /** Moves the next shuffle ID so that it will not conflict with the given id. */
+  private[spark] def updateShuffleId(id: Int) {
+    val delta = id - nextShuffleId.get + 1
+    if (delta > 0) {
+      nextShuffleId.addAndGet(delta)
+    }
+  }
+
   private var nextRddId = new AtomicInteger(0)
 
   // Register a new RDD, returning its RDD ID
   private[spark] def newRddId(): Int = {
     nextRddId.getAndIncrement()
+  }
+
+  /** Moves the next RDD ID so that it will not conflict with the given id. */
+  private[spark] def updateRddId(id: Int) {
+    val delta = id - nextRddId.get + 1
+    if (delta > 0) {
+      nextRddId.addAndGet(delta)
+    }
   }
 }
 

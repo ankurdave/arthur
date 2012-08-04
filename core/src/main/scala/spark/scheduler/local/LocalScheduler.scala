@@ -56,13 +56,17 @@ class LocalScheduler(threads: Int, maxFailures: Int) extends TaskScheduler with 
         // executor does. This is useful to catch serialization errors early
         // on in development (so when users move their local Spark programs
         // to the cluster, they don't get surprised by serialization errors).
-        val resultToReturn = ser.deserialize[Any](ser.serialize(result))
+        val serializedResult = ser.serialize(result)
+        val resultToReturn = ser.deserialize[Any](serializedResult)
         val accumUpdates = Accumulators.values
         logInfo("Finished task " + idInJob)
         listener.taskEnded(task, Success, resultToReturn, accumUpdates)
+        env.eventReporter.reportTaskChecksum(
+          task, new TaskResult(result, accumUpdates), serializedResult.array)
       } catch {
         case t: Throwable => {
           logError("Exception in task " + idInJob, t)
+          env.eventReporter.reportLocalException(t, task)
           failCount.synchronized {
             failCount(idInJob) += 1
             if (failCount(idInJob) <= maxFailures) {

@@ -38,7 +38,7 @@ class NewHadoopRDD[K, V](
   @transient
   private val jobId = new JobID(jobtrackerId, id)
 
-  @transient
+  @transient @LocallyPersistent
   private val splits_ : Array[Split] = {
     val inputFormat = inputFormatClass.newInstance
     val jobContext = new JobContext(serializableConf.value, jobId)

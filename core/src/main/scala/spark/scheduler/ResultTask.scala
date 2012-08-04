@@ -4,8 +4,8 @@ import spark._
 
 class ResultTask[T, U](
     stageId: Int,
-    rdd: RDD[T],
-    func: (TaskContext, Iterator[T]) => U,
+    val rdd: RDD[T],
+    val func: (TaskContext, Iterator[T]) => U,
     val partition: Int,
     @transient locs: Seq[String],
     val outputId: Int)

@@ -58,13 +58,13 @@ class Executor extends Logging {
       SparkEnv.set(env)
       Thread.currentThread.setContextClassLoader(classLoader)
       val ser = SparkEnv.get.closureSerializer.newInstance()
+      val task = ser.deserialize[Task[Any]](serializedTask, classLoader)
       logInfo("Running task ID " + taskId)
       context.statusUpdate(taskId, TaskState.RUNNING, EMPTY_BYTE_BUFFER)
       try {
         SparkEnv.set(env)
         Thread.currentThread.setContextClassLoader(classLoader)
         Accumulators.clear()
-        val task = ser.deserialize[Task[Any]](serializedTask, classLoader)
         env.mapOutputTracker.updateGeneration(task.generation)
         val value = task.run(taskId.toInt)
         val accumUpdates = Accumulators.values
@@ -72,6 +72,7 @@ class Executor extends Logging {
         val serializedResult = ser.serialize(result)
         logInfo("Serialized size of result for " + taskId + " is " + serializedResult.limit)
         context.statusUpdate(taskId, TaskState.FINISHED, serializedResult)
+        env.eventReporter.reportTaskChecksum(task, result, serializedResult.array)
         logInfo("Finished task ID " + taskId)
       } catch {
         case ffe: FetchFailedException => {
@@ -87,6 +88,7 @@ class Executor extends Logging {
           // have left some weird state around depending on when the exception was thrown, but on
           // the other hand, maybe we could detect that when future tasks fail and exit then.
           logError("Exception in task ID " + taskId, t)
+          env.eventReporter.reportException(t, task)
           //System.exit(1)
         }
       }

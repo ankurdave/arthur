@@ -13,7 +13,7 @@ class CartesianRDD[T: ClassManifest, U:ClassManifest](
   
   val numSplitsInRdd2 = rdd2.splits.size
   
-  @transient
+  @transient @LocallyPersistent
   val splits_ = {
     // create the cross product split
     val array = new Array[Split](rdd1.splits.size * rdd2.splits.size)

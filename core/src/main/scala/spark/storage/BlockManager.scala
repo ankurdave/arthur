@@ -9,10 +9,12 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.Collections
 
-import akka.dispatch.{Await, Future}
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashMap
 import scala.collection.JavaConversions._
+
+import akka.dispatch.{Await, Future}
+import akka.util.Duration
 
 import it.unimi.dsi.fastutil.io._
 
@@ -23,9 +25,9 @@ import spark.SizeEstimator
 import spark.SparkEnv
 import spark.SparkException
 import spark.Utils
-import spark.util.ByteBufferInputStream
+import spark.debugger.EventReporter
 import spark.network._
-import akka.util.Duration
+import spark.util.ByteBufferInputStream
 
 class BlockManagerId(var ip: String, var port: Int) extends Externalizable {
   def this() = this(null, 0)
@@ -63,7 +65,11 @@ class BlockLocker(numLockers: Int) {
 }
 
 
-class BlockManager(val master: BlockManagerMaster, val serializer: Serializer, maxMemory: Long)
+class BlockManager(
+    val master: BlockManagerMaster,
+    val serializer: Serializer,
+    val eventReporter: EventReporter,
+    maxMemory: Long)
   extends Logging {
 
   case class BlockInfo(level: StorageLevel, tellMaster: Boolean)
@@ -92,8 +98,8 @@ class BlockManager(val master: BlockManagerMaster, val serializer: Serializer, m
   /**
    * Construct a BlockManager with a memory limit set based on system properties.
    */
-  def this(master: BlockManagerMaster, serializer: Serializer) = {
-    this(master, serializer, BlockManager.getMaxMemoryFromSystemProperties)
+  def this(master: BlockManagerMaster, serializer: Serializer, eventReporter: EventReporter) = {
+    this(master, serializer, eventReporter, BlockManager.getMaxMemoryFromSystemProperties)
   }
 
   /**
@@ -414,6 +420,11 @@ class BlockManager(val master: BlockManagerMaster, val serializer: Serializer, m
       replicate(blockId, bytes, level) 
     }
 
+    // Checksum the block.
+    // TODO(ankurdave): Run this asynchronously, or if writing to disk, checksum while writing to
+    // reduce overhead.
+    eventReporter.reportBlockChecksum(blockId, bytes.array)
+
     // TODO: This code will be removed when CacheTracker is gone.
     if (blockId.startsWith("rdd")) {
       notifyTheCacheTracker(blockId)
@@ -471,6 +482,11 @@ class BlockManager(val master: BlockManagerMaster, val serializer: Serializer, m
     if (blockId.startsWith("rdd")) {
       notifyTheCacheTracker(blockId)
     }
+
+    // Checksum the block.
+    // TODO(ankurdave): Run this asynchronously, or if writing to disk, checksum while writing to
+    // reduce overhead.
+    eventReporter.reportBlockChecksum(blockId, bytes.array)
    
     // If replication had started, then wait for it to finish
     if (level.replication > 1) {

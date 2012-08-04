@@ -27,6 +27,8 @@ import org.apache.hadoop.mapred.TextOutputFormat
 
 import it.unimi.dsi.fastutil.objects.{Object2LongOpenHashMap => OLMap}
 
+import spark.debugger.EventLogInputStream
+import spark.debugger.EventLogOutputStream
 import spark.partial.BoundedDouble
 import spark.partial.CountEvaluator
 import spark.partial.GroupedCountEvaluator
@@ -54,12 +56,12 @@ import SparkContext._
  * addition, PairRDDFunctions contains extra methods available on RDDs of key-value pairs, and 
  * SequenceFileRDDFunctions contains extra methods for saving RDDs to Hadoop SequenceFiles.
  */
-abstract class RDD[T: ClassManifest](@transient sc: SparkContext) extends Serializable {
+abstract class RDD[T: ClassManifest](@transient private var sc: SparkContext) extends Serializable {
 
   // Methods that must be implemented by subclasses
   def splits: Array[Split]
   def compute(split: Split): Iterator[T]
-  @transient val dependencies: List[Dependency[_]]
+  @transient @LocallyPersistent val dependencies: List[Dependency[_]]
   
   // Optionally overridden by subclasses to specify how they are partitioned
   val partitioner: Option[Partitioner] = None
@@ -71,6 +73,9 @@ abstract class RDD[T: ClassManifest](@transient sc: SparkContext) extends Serial
   
   // Get a unique ID for this RDD
   val id = sc.newRddId()
+
+  // Store where the RDD was created to aid in debugging
+  val creationLocation = Thread.currentThread.getStackTrace
   
   // Variables relating to persistence
   private var storageLevel: StorageLevel = StorageLevel.NONE
@@ -372,6 +377,48 @@ abstract class RDD[T: ClassManifest](@transient sc: SparkContext) extends Serial
   /** A private method for tests, to look at the contents of each partition */
   private[spark] def collectPartitions(): Array[Array[T]] = {
     sc.runJob(this, (iter: Iterator[T]) => iter.toArray)
+  }
+
+  private def getDeclaredFieldsRecursively(cls: Class[_]): List[java.lang.reflect.Field] = {
+    (cls.getSuperclass match {
+      case null => List()
+      case superclass => getDeclaredFieldsRecursively(superclass)
+    }) ::: cls.getDeclaredFields.toList
+  }
+
+  private def writeObject(stream: java.io.ObjectOutputStream) {
+    stream.defaultWriteObject()
+    stream match {
+      case s: EventLogOutputStream => {
+        for (field <- getDeclaredFieldsRecursively(this.getClass)
+             if java.lang.reflect.Modifier.isTransient(field.getModifiers)
+             && field.isAnnotationPresent(classOf[LocallyPersistent])) {
+          val accessible = field.isAccessible
+          field.setAccessible(true)
+          stream.writeObject(field.get(this))
+          field.setAccessible(accessible)
+        }
+      }
+      case _ => {}
+    }
+  }
+
+  private def readObject(stream: java.io.ObjectInputStream) {
+    stream.defaultReadObject()
+    stream match {
+      case s: EventLogInputStream => {
+        sc = s.sc
+        for (field <- getDeclaredFieldsRecursively(this.getClass)
+             if java.lang.reflect.Modifier.isTransient(field.getModifiers)
+             && field.isAnnotationPresent(classOf[LocallyPersistent])) {
+          val accessible = field.isAccessible
+          field.setAccessible(true)
+          field.set(this, stream.readObject())
+          field.setAccessible(accessible)
+        }
+      }
+      case _ => {}
+    }
   }
 }
 
