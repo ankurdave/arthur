@@ -22,23 +22,26 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
     file = new File(elp)
     if file.exists
   } yield new EventLogInputStream(new FileInputStream(file), sc)
+
   val events = new mutable.ArrayBuffer[EventLogEntry]
+
   /** List of RDDs indexed by their canonical ID. */
   private val _rdds = new mutable.ArrayBuffer[RDD[_]]
+
   /** Map of RDD ID to canonical RDD ID (reverse of _rdds). */
   private val rddIdToCanonical = new mutable.HashMap[Int, Int]
   loadNewEvents()
 
-  // Receive new events directly from EventLogWriter, as they occur
-  for (w <- sc.env.eventReporter.eventLogWriter)
-    w.registerEventLogReader(this)
+  val checksumVerifier = new ChecksumVerifier
+
+  // Receive new events as they occur
+  sc.env.eventReporter.subscribe(addEvent _)
 
   /** List of RDDs from the event log, indexed by their IDs. */
   def rdds = _rdds.readOnly
 
   /** List of checksum mismatches. */
-  def checksumMismatches: Seq[ChecksumEvent] =
-    for (w <- sc.env.eventReporter.eventLogWriter.toList; m <- w.checksumMismatches) yield m
+  def checksumMismatches: Seq[ChecksumEvent] = checksumVerifier.mismatches
 
   /** Prints a human-readable list of RDDs. */
   def printRDDs() {
@@ -104,13 +107,8 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
           val event = ois.readObject.asInstanceOf[EventLogEntry]
           addEvent(event)
 
-          // Tell EventLogWriter about checksum events so it can do
-          // checksum verification
           event match {
-            case c: ChecksumEvent =>
-              for (w <- sc.env.eventReporter.eventLogWriter) {
-                w.processChecksumEvent(c)
-              }
+            case c: ChecksumEvent => checksumVerifier.verify(c)
             case _ => {}
           }
         }
@@ -120,7 +118,7 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
     }
   }
 
-  private[spark] def addEvent(event: EventLogEntry) {
+  private def addEvent(event: EventLogEntry) {
     events += event
     event match {
       case RDDCreation(rdd, location) =>

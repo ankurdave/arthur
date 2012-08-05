@@ -423,7 +423,10 @@ class BlockManager(
     // Checksum the block.
     // TODO(ankurdave): Run this asynchronously, or if writing to disk, checksum while writing to
     // reduce overhead.
-    eventReporter.reportBlockChecksum(blockId, bytes.array)
+    // TODO(ankurdave): Consider checksumming even when the data isn't already serialized.
+    if (bytes != null) {
+      eventReporter.reportBlockChecksum(blockId, bytes.array)
+    }
 
     // TODO: This code will be removed when CacheTracker is gone.
     if (blockId.startsWith("rdd")) {

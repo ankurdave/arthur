@@ -2,6 +2,7 @@ package spark
 
 import akka.actor.ActorSystem
 
+import spark.debugger.ActorBasedEventReporter
 import spark.debugger.EventReporter
 import spark.storage.BlockManager
 import spark.storage.BlockManagerMaster
@@ -69,7 +70,7 @@ object SparkEnv {
     val serializerClass = System.getProperty("spark.serializer", "spark.KryoSerializer")
     val serializer = Class.forName(serializerClass).newInstance().asInstanceOf[Serializer]
     
-    val eventReporter = new EventReporter(actorSystem, isMaster)
+    val eventReporter = new ActorBasedEventReporter(actorSystem, isMaster)
 
     val blockManagerMaster = new BlockManagerMaster(actorSystem, isMaster, isLocal)
 
