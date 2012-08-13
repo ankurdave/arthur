@@ -62,8 +62,7 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     // Read it back from the event log
     val sc2 = makeSparkContext(eventLog)
     val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
-    assert(r.rdds.size === 1)
-    assert(r.rdd(0).collect.toList === (1 to 4).toList)
+    assert(r.rdd(nums.id).collect.toList === (1 to 4).toList)
     sc2.stop()
   }
 
@@ -129,7 +128,7 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     // Make a new RDD and check for ID conflicts
     val nums2 = sc2.makeRDD(Seq((1, 2), (3, 4)))
     val nums2Reduced = nums2.reduceByKey(_ + _)
-    for (rddId <- r.rdds.keys if rddId <= numsReduced.id) {
+    for (rddId <- r.rddIds if rddId <= numsReduced.id) {
       assert(nums2.id != rddId)
       assert(nums2Reduced.id != rddId)
     }
@@ -157,9 +156,8 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     // Read them back from the event log
     val sc2 = makeSparkContext(eventLog)
     val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
-    assert(r.rdds.size === 2)
-    assert(r.rdd(0).collect.toList === (1 to 4).toList)
-    assert(r.rdd(1).collect.toList != collected.toList)
+    assert(r.rdd(nums.id).collect.toList === (1 to 4).toList)
+    assert(r.rdd(numsNondeterministic.id).collect.toList != collected.toList)
     // Ensure that all checksums have gone through
     sc2.stop()
 
@@ -167,7 +165,7 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     assert(r.checksumVerifier.mismatches.nonEmpty)
   }
 
-/*  test("checksum verification - no false positives") {
+  test("checksum verification - no false positives") {
     // Initialize event log
     val tempDir = Files.createTempDir()
     val eventLog = new File(tempDir, "eventLog")
@@ -181,7 +179,7 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     // Read them back from the event log and recompute them
     val sc2 = makeSparkContext(eventLog)
     val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
-    r.rdds(r.rdds.length - 1).collect()
+    r.rdd(rdd.id).collect()
     // Ensure that all checksums have gone through
     sc2.stop()
 
@@ -218,6 +216,7 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     System.setProperty("spark.debugger.enable", "false")
     val sc = makeSparkContext(eventLog)
     val nums = sc.makeRDD(1 to 4)
+    nums.collect()
     sc.stop()
 
     // Make sure the event log is empty
@@ -235,7 +234,7 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
 
     // Make an RDD
     val sc = makeSparkContext(eventLog, enableChecksumming = false)
-    val nums = sc.makeRDD(1 to 4).collect
+    val nums = sc.makeRDD(1 to 4).collect()
     sc.stop()
 
     // Make sure the event log has no checksums
@@ -244,5 +243,4 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     assert(r.events.collect { case e: ChecksumEvent => e }.isEmpty)
     sc2.stop()
   }
-*/
 }

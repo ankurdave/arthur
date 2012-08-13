@@ -25,7 +25,7 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
 
   val events = new mutable.ArrayBuffer[EventLogEntry]
   val checksumVerifier = new ChecksumVerifier
-  val rdds = new mutable.HashMap[Int, RDD[_]]
+  private val rdds = new mutable.HashMap[Int, RDD[_]]
 
   // Receive new events as they occur
   sc.env.eventReporter.subscribe(addEvent _)
@@ -34,6 +34,8 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
 
   /** Looks up an RDD by ID. */
   def rdd(id: Int): RDD[_] = rdds(id)
+
+  def rddIds: Iterable[Int] = rdds.keys
 
   /** List of checksum mismatches. */
   def checksumMismatches: Seq[ChecksumEvent] = checksumVerifier.mismatches
