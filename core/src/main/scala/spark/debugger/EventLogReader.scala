@@ -17,28 +17,23 @@ import spark.ShuffleDependency
  * Reads events from an event log on disk and processes them.
  */
 class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) extends Logging {
-  val objectInputStream = for {
+  private val objectInputStream = for {
     elp <- eventLogPath orElse { Option(System.getProperty("spark.debugger.logPath")) }
     file = new File(elp)
     if file.exists
   } yield new EventLogInputStream(new FileInputStream(file), sc)
 
   val events = new mutable.ArrayBuffer[EventLogEntry]
-
-  /** List of RDDs indexed by their canonical ID. */
-  private val _rdds = new mutable.ArrayBuffer[RDD[_]]
-
-  /** Map of RDD ID to canonical RDD ID (reverse of _rdds). */
-  private val rddIdToCanonical = new mutable.HashMap[Int, Int]
-  loadNewEvents()
-
   val checksumVerifier = new ChecksumVerifier
+  val rdds = new mutable.HashMap[Int, RDD[_]]
 
   // Receive new events as they occur
   sc.env.eventReporter.subscribe(addEvent _)
 
-  /** List of RDDs from the event log, indexed by their IDs. */
-  def rdds = _rdds.readOnly
+  loadNewEvents()
+
+  /** Looks up an RDD by ID. */
+  def rdd(id: Int): RDD[_] = rdds(id)
 
   /** List of checksum mismatches. */
   def checksumMismatches: Seq[ChecksumEvent] = checksumVerifier.mismatches
@@ -50,55 +45,6 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
     }
   }
 
-  /** Returns the path of a PDF file containing a visualization of the RDD graph. */
-  def visualizeRDDs(): String = {
-    val file = File.createTempFile("spark-rdds-", "")
-    val dot = new java.io.PrintWriter(file)
-    dot.println("digraph {")
-    for (RDDCreation(rdd, location) <- events) {
-      dot.println("  %d [label=\"%d %s\"]".format(rdd.id, rdd.id, rddType(rdd)))
-      for (dep <- rdd.dependencies) {
-        dot.println("  %d -> %d;".format(rdd.id, dep.rdd.id))
-      }
-    }
-    dot.println("}")
-    dot.close()
-    Runtime.getRuntime.exec("dot -Grankdir=BT -Tpdf " + file + " -o " + file + ".pdf")
-    file + ".pdf"
-  }
-
-  /** List of all tasks. */
-  def tasks: Seq[Task[_]] =
-    for {
-      TaskSubmission(tasks) <- events
-      task <- tasks
-    } yield task
-
-
-  /** Finds the tasks that were run to compute the given RDD. */
-  def tasksForRDD(rdd: RDD[_]): Seq[Task[_]] =
-    for {
-      task <- tasks
-      taskRDD <- task match {
-        case rt: ResultTask[_, _] => Some(rt.rdd)
-        case smt: ShuffleMapTask => Some(smt.rdd)
-        case _ => None
-      }
-      if taskRDD.id == rdd.id
-    } yield task
-
-  /** Finds the task for the given stage ID and partition. */
-  def taskWithId(stageId: Int, partition: Int): Option[Task[_]] =
-    (for {
-      task <- tasks
-      (taskStageId, taskPartition) <- task match {
-        case rt: ResultTask[_, _] => Some((rt.stageId, rt.partition))
-        case smt: ShuffleMapTask => Some((smt.stageId, smt.partition))
-        case _ => None
-      }
-      if taskStageId == stageId && taskPartition == partition
-    } yield task).headOption
-
   /** Reads any new events from the event log. */
   def loadNewEvents() {
     for (ois <- objectInputStream) {
@@ -106,11 +52,6 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
         while (true) {
           val event = ois.readObject.asInstanceOf[EventLogEntry]
           addEvent(event)
-
-          event match {
-            case c: ChecksumEvent => checksumVerifier.verify(c)
-            case _ => {}
-          }
         }
       } catch {
         case e: EOFException => {}
@@ -128,8 +69,9 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
             sc.updateShuffleId(shufDep.shuffleId)
           case _ => {}
         }
-        _rdds += rdd
-        rddIdToCanonical(rdd.id) = rdd.id
+        rdds(rdd.id) = rdd
+      case c: ChecksumEvent =>
+        checksumVerifier.verify(c)
       case _ => {}
     }
   }

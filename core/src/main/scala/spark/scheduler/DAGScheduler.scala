@@ -368,7 +368,7 @@ class DAGScheduler(taskSched: TaskScheduler) extends TaskSchedulerListener with 
       logDebug("New pending tasks: " + myPending)
       taskSched.submitTasks(
         new TaskSet(tasks.toArray, stage.id, stage.newAttemptId(), stage.priority))
-      SparkEnv.get.eventReporter.registerTasks(tasks)
+      env.eventReporter.registerTasks(tasks)
     } else {
       logDebug("Stage " + stage + " is actually done; %b %d %d".format(
         stage.isAvailable, stage.numAvailableOutputs, stage.numPartitions))

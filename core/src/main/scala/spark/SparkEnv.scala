@@ -4,6 +4,7 @@ import akka.actor.ActorSystem
 
 import spark.debugger.ActorBasedEventReporter
 import spark.debugger.EventReporter
+import spark.debugger.MockEventReporter
 import spark.storage.BlockManager
 import spark.storage.BlockManagerMaster
 import spark.network.ConnectionManager
@@ -70,7 +71,12 @@ object SparkEnv {
     val serializerClass = System.getProperty("spark.serializer", "spark.KryoSerializer")
     val serializer = Class.forName(serializerClass).newInstance().asInstanceOf[Serializer]
     
-    val eventReporter = new ActorBasedEventReporter(actorSystem, isMaster)
+    // TODO(ankurdave): Disable debugger by default
+    val eventReporter = if (System.getProperty("spark.debugger.enable", "true").toBoolean) {
+      new ActorBasedEventReporter(actorSystem, isMaster)
+    } else {
+      new MockEventReporter
+    }
 
     val blockManagerMaster = new BlockManagerMaster(actorSystem, isMaster, isLocal)
 
