@@ -30,19 +30,6 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     System.setProperties(savedProperties)
   }
 
-  /**
-   * Enables event logging for the current SparkEnv without setting spark.arthur.logPath. This is
-   * useful for unit tests, where setting a property affects other tests as well.
-   */
-  def initializeEventLogging(eventLog: File, enableChecksumming: Boolean) {
-    SparkEnv.get.eventReporter match {
-      case r: ActorBasedEventReporter =>
-        r.eventLogWriter.get.setEventLogPath(Some(eventLog.getAbsolutePath))
-        r.enableChecksumming = enableChecksumming
-      case _ => {}
-    }
-  }
-
   def makeSparkContext(
     eventLog: File,
     enableDebugging: Boolean = true,
@@ -73,48 +60,6 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     assert(r.rdd(nums.id).collect.toList === (1 to 4).toList)
     sc2.stop()
   }
-
-  // TODO(ankurdave): Uncomment this test when we can have 2 SparkEnvs simultaneously.
-/*  test("interactive event log reading") {
-    // Initialize event log
-    val tempDir = Files.createTempDir()
-    val eventLog = new File(tempDir, "eventLog")
-
-    // Make an RDD
-    val sc = makeSparkContext(eventLog)
-    val nums = sc.makeRDD(1 to 4)
-    nums.collect()
-    SparkEnv.get.eventReporter match {
-      case r: ActorBasedEventReporter =>
-        r.eventLogWriter.get.flush()
-      case _ => {}
-    }
-
-    // Read the RDD back from the event log
-    val sc2 = makeSparkContextWithoutEventLogging()
-    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
-    assert(r.rdds.length === 1)
-    assert(r.rdds(0).collect.toList === List(1, 2, 3, 4))
-
-    // Make another RDD
-    SparkEnv.set(sc.env)
-    val nums2 = sc.makeRDD(1 to 5)
-    SparkEnv.get.eventReporter match {
-      case r: ActorBasedEventReporter =>
-        r.eventLogWriter.get.flush()
-      case _ => {}
-    }
-
-    // Read it back from the event log
-    SparkEnv.set(sc2.env)
-    r.loadNewEvents()
-    assert(r.rdds.length === 2)
-    assert(r.rdds(1).collect.toList === List(1, 2, 3, 4, 5))
-
-    sc.stop()
-    sc2.stop()
-  }
-*/
 
   test("set nextRddId and nextShuffleId after restoring") {
     // Initialize event log
