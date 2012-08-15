@@ -3,11 +3,12 @@ package spark.debugger
 import com.google.common.io.Files
 
 import java.io.File
+import java.util.Properties
 
 import org.apache.hadoop.io._
 
+import org.scalatest.BeforeAndAfter
 import org.scalatest.FunSuite
-import org.scalatest.PrivateMethodTester
 
 import scala.collection.immutable.HashSet
 import scala.collection.mutable.ArrayBuffer
@@ -20,7 +21,15 @@ import spark.ShuffleDependency
 import spark.SparkContext
 import spark.SparkContext._
 
-class EventLoggingSuite extends FunSuite with PrivateMethodTester {
+class EventLoggingSuite extends FunSuite with BeforeAndAfter {
+  var savedProperties: Properties = _
+  before {
+    savedProperties = System.getProperties()
+  }
+  after {
+    System.setProperties(savedProperties)
+  }
+
   /**
    * Enables event logging for the current SparkEnv without setting spark.arthur.logPath. This is
    * useful for unit tests, where setting a property affects other tests as well.
@@ -34,16 +43,15 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     }
   }
 
-  def makeSparkContextWithoutEventLogging(): SparkContext = {
-    new SparkContext("local", "test")
-  }
-
   def makeSparkContext(
     eventLog: File,
+    enableDebugging: Boolean = true,
     enableChecksumming: Boolean = true
   ): SparkContext = {
-    val sc = makeSparkContextWithoutEventLogging()
-    initializeEventLogging(eventLog, enableChecksumming)
+    System.setProperty("spark.debugger.enable", enableDebugging.toString)
+    System.setProperty("spark.debugger.logPath", eventLog.getPath)
+    System.setProperty("spark.debugger.checksum", enableChecksumming.toString)
+    val sc = new SparkContext("local", "test")
     sc
   }
 
@@ -207,14 +215,13 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     sc2.stop()
   }
 
-  test("disable Arthur") {
+  test("disable debugging") {
     // Initialize event log
     val tempDir = Files.createTempDir()
     val eventLog = new File(tempDir, "eventLog")
 
     // Make an RDD
-    System.setProperty("spark.debugger.enable", "false")
-    val sc = makeSparkContext(eventLog)
+    val sc = makeSparkContext(eventLog, enableDebugging = false)
     val nums = sc.makeRDD(1 to 4)
     nums.collect()
     sc.stop()
@@ -224,7 +231,6 @@ class EventLoggingSuite extends FunSuite with PrivateMethodTester {
     val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
     assert(r.events.isEmpty)
     sc2.stop()
-    System.setProperty("spark.debugger.enable", "true")
   }
 
   test("disable checksumming") {

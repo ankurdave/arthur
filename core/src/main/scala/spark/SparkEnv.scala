@@ -72,8 +72,7 @@ object SparkEnv {
     val serializerClass = System.getProperty("spark.serializer", "spark.KryoSerializer")
     val serializer = Class.forName(serializerClass).newInstance().asInstanceOf[Serializer]
     
-    // TODO(ankurdave): Disable debugger by default
-    val eventReporter = if (System.getProperty("spark.debugger.enable", "true").toBoolean) {
+    val eventReporter = if (System.getProperty("spark.debugger.enable", "false").toBoolean) {
       new ActorBasedEventReporter(actorSystem, isMaster)
     } else {
       new MockEventReporter
