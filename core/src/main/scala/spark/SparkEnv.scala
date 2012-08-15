@@ -37,6 +37,7 @@ class SparkEnv (
     shuffleManager.stop()
     blockManager.stop()
     blockManager.master.stop()
+    eventReporter.stop()
     actorSystem.shutdown()
     actorSystem.awaitTermination()
   }

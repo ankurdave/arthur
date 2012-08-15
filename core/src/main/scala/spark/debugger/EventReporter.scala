@@ -51,6 +51,8 @@ trait EventReporter {
   def reportBlockChecksum(blockId: String, blockBytes: Array[Byte])
   // Allows subscription to events as they are logged. Can only be called from the master.
   def subscribe(callback: EventLogEntry => Unit)
+  // Closes any resources held by the EventReporter, blocking until completion.
+  def stop()
   // Whether or not checksumming is enabled.
   var enableChecksumming: Boolean
 }
@@ -65,6 +67,7 @@ class MockEventReporter extends EventReporter {
     task: Task[_], result: TaskResult[_], serializedResult: Array[Byte]) {}
   override def reportBlockChecksum(blockId: String, blockBytes: Array[Byte]) {}
   override def subscribe(callback: EventLogEntry => Unit) {}
+  override def stop() {}
   override def enableChecksumming: Boolean = false
   override def enableChecksumming_=(value: Boolean) {}
 }
@@ -172,7 +175,7 @@ class ActorBasedEventReporter(
   }
 
   // Stops the reporter actor and the event log writer.
-  def stop() {
+  override def stop() {
     if (askReporter(StopEventReporter) != true) {
       throw new SparkException("Error reply received from EventReporter")
     }
