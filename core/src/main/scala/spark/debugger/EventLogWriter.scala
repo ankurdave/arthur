@@ -38,27 +38,33 @@ class EventLogWriter extends Logging {
   }
 
   def log(entry: EventLogEntry) {
-    for (l <- eventLog) {
-      l.writeObject(entry)
-    }
-    entry match {
-      case c: ChecksumEvent => checksumVerifier.verify(c)
-      case _ => {}
-    }
-    for (s <- subscribers) {
-      s(entry)
+    synchronized {
+      for (l <- eventLog) {
+        l.writeObject(entry)
+      }
+      entry match {
+        case c: ChecksumEvent => checksumVerifier.verify(c)
+        case _ => {}
+      }
+      for (s <- subscribers) {
+        s(entry)
+      }
     }
   }
 
   def flush() {
-    for (l <- eventLog) {
-      l.flush()
+    synchronized {
+      for (l <- eventLog) {
+        l.flush()
+      }
     }
   }
 
   def stop() {
-    for (l <- eventLog) {
-      l.close()
+    synchronized {
+      for (l <- eventLog) {
+        l.close()
+      }
     }
   }
 }

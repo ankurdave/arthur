@@ -73,11 +73,10 @@ class MockEventReporter extends EventReporter {
 }
 
 /**
- * Manages event reporting on the master and slaves.
+ * Manages event reporting on the master and slaves. Event reporting is thread-safe.
  */
-// TODO(ankurdave): Make this thread-safe, because it's called from multiple threads in
-// spark.executor.Executor.
 // TODO(ankurdave): Consider splitting the master and slave functionality.
+// TODO(ankurdave): Mock out and unit-test this class.
 class ActorBasedEventReporter(
   actorSystem: ActorSystem, isMaster: Boolean) extends EventReporter with Logging {
 
@@ -188,12 +187,14 @@ class ActorBasedEventReporter(
 
   // Used for reporting from either the master or a slave.
   private def report(message: EventReporterMessage) {
+    // ActorRef.tell is thread-safe.
     reporterActor.tell(message)
   }
 
   // Used only for reporting from the master.
   private def report(entry: EventLogEntry) {
     for (elw <- eventLogWriter) {
+      // EventLogWriter.log is thread-safe.
       elw.log(entry)
     }
   }
