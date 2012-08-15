@@ -72,7 +72,7 @@ class Executor extends Logging {
         val serializedResult = ser.serialize(result)
         logInfo("Serialized size of result for " + taskId + " is " + serializedResult.limit)
         context.statusUpdate(taskId, TaskState.FINISHED, serializedResult)
-        env.eventReporter.reportTaskChecksum(task, result, serializedResult.array)
+        env.eventReporter.reportTaskChecksum(task, accumUpdates, serializedResult.array)
         logInfo("Finished task ID " + taskId)
       } catch {
         case ffe: FetchFailedException => {

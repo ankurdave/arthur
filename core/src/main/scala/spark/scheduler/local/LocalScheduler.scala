@@ -61,8 +61,7 @@ class LocalScheduler(threads: Int, maxFailures: Int) extends TaskScheduler with 
         val accumUpdates = Accumulators.values
         logInfo("Finished task " + idInJob)
         listener.taskEnded(task, Success, resultToReturn, accumUpdates)
-        env.eventReporter.reportTaskChecksum(
-          task, new TaskResult(result, accumUpdates), serializedResult.array)
+        env.eventReporter.reportTaskChecksum(task, accumUpdates, serializedResult.array)
       } catch {
         case t: Throwable => {
           logError("Exception in task " + idInJob, t)

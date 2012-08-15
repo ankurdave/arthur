@@ -46,7 +46,8 @@ trait EventReporter {
   // Reports the creation of a task. Can only be called from the master.
   def registerTasks(tasks: Seq[Task[_]])
   // Reports the checksum of a task's results.
-  def reportTaskChecksum(task: Task[_], result: TaskResult[_], serializedResult: Array[Byte])
+  def reportTaskChecksum(
+    task: Task[_], accumUpdates: mutable.Map[Long, Any], serializedResult: Array[Byte])
   // Reports the checksum of a block, which is typically created as the output of a task.
   def reportBlockChecksum(blockId: String, blockBytes: Array[Byte])
   // Allows subscription to events as they are logged. Can only be called from the master.
@@ -64,7 +65,7 @@ class MockEventReporter extends EventReporter {
   override def registerRDD(rdd: RDD[_]) {}
   override def registerTasks(tasks: Seq[Task[_]]) {}
   override def reportTaskChecksum(
-    task: Task[_], result: TaskResult[_], serializedResult: Array[Byte]) {}
+    task: Task[_], accumUpdates: mutable.Map[Long, Any], serializedResult: Array[Byte]) {}
   override def reportBlockChecksum(blockId: String, blockBytes: Array[Byte]) {}
   override def subscribe(callback: EventLogEntry => Unit) {}
   override def stop() {}
@@ -135,7 +136,7 @@ class ActorBasedEventReporter(
 
   override def reportTaskChecksum(
       task: Task[_],
-      result: TaskResult[_],
+      accumUpdates: mutable.Map[Long, Any],
       serializedResult: Array[Byte]) {
     if (enableChecksumming) {
       val checksum = new MurmurHash[Byte](42) // constant seed so checksum is reproducible
@@ -150,7 +151,7 @@ class ActorBasedEventReporter(
         case smt: ShuffleMapTask =>
           // Don't serialize the output of a ShuffleMapTask, only its
           // accumulator updates. The output is a URI that may change.
-          val serializedAccumUpdates = Utils.serialize(result.accumUpdates)
+          val serializedAccumUpdates = Utils.serialize(accumUpdates)
           for (byte <- serializedAccumUpdates) checksum(byte)
           report(LogEvent(ShuffleMapTaskChecksum(smt.rdd.id, smt.partition, checksum.hash)))
         case _ =>
