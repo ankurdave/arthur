@@ -10,7 +10,8 @@ import org.apache.hadoop.io._
 import org.scalatest.BeforeAndAfter
 import org.scalatest.FunSuite
 
-import scala.collection.immutable.HashSet
+import scala.collection.immutable
+import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.io.Source
 
@@ -22,12 +23,18 @@ import spark.SparkContext
 import spark.SparkContext._
 
 class EventLoggingSuite extends FunSuite with BeforeAndAfter {
-  var savedProperties: Properties = _
-  before {
-    savedProperties = System.getProperties()
-  }
+  // Reset the system properties after running each test.
+  val prevProperties: mutable.Map[String, String] = new mutable.HashMap[String, String]
+  val propertiesToRestore: immutable.Set[String] = immutable.HashSet(
+    "spark.debugger.enable", "spark.debugger.logPath", "spark.debugger.checksum")
   after {
-    System.setProperties(savedProperties)
+    for (prop <- propertiesToRestore; value <- prevProperties.get(prop)) {
+      if (value == null) {
+        System.clearProperty(prop)
+      } else {
+        System.setProperty(prop, value)
+      }
+    }
   }
 
   def makeSparkContext(
@@ -35,11 +42,18 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     enableDebugging: Boolean = true,
     enableChecksumming: Boolean = true
   ): SparkContext = {
-    System.setProperty("spark.debugger.enable", enableDebugging.toString)
-    System.setProperty("spark.debugger.logPath", eventLog.getPath)
-    System.setProperty("spark.debugger.checksum", enableChecksumming.toString)
-    val sc = new SparkContext("local", "test")
-    sc
+    val newProperties = Map(
+      "spark.debugger.enable" -> enableDebugging.toString,
+      "spark.debugger.logPath" -> eventLog.getPath,
+      "spark.debugger.checksum" -> enableChecksumming.toString)
+    for ((prop, newValue) <- newProperties) {
+      val oldValue = System.setProperty(prop, newValue)
+      prevProperties.put(prop, oldValue)
+    }
+    new SparkContext("local", "test")
+  }
+
+  def setSystemProperty(property: String, value: String) {
   }
 
   test("restore ParallelCollection from log") {
