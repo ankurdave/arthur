@@ -1,26 +1,26 @@
 package spark.debugger
 
-import com.google.common.io.Files
+import scala.collection.immutable
+import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
+import scala.io.Source
 
 import java.io.File
 import java.util.Properties
+
+import com.google.common.io.Files
 
 import org.apache.hadoop.io._
 
 import org.scalatest.BeforeAndAfter
 import org.scalatest.FunSuite
 
-import scala.collection.immutable
-import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
-import scala.io.Source
-
-import spark.RDD
 import spark.HashPartitioner
-import spark.SparkEnv
+import spark.RDD
 import spark.ShuffleDependency
 import spark.SparkContext
 import spark.SparkContext._
+import spark.SparkEnv
 
 class EventLoggingSuite extends FunSuite with BeforeAndAfter {
   // Reset the system properties after running each test.
@@ -129,7 +129,7 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     sc2.stop()
 
     // Make sure we found a checksum mismatch
-    assert(r.checksumVerifier.mismatches.nonEmpty)
+    assert(r.checksumMismatches.nonEmpty)
   }
 
   test("checksum verification - no false positives") {
@@ -151,7 +151,7 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     sc2.stop()
 
     // Make sure we didn't find any checksum mismatches
-    assert(r.checksumVerifier.mismatches.isEmpty)
+    assert(r.checksumMismatches.isEmpty)
   }
 
   test("task submission logging") {

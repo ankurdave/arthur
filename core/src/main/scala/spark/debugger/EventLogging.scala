@@ -6,27 +6,24 @@ import spark.scheduler.Task
 import spark.RDD
 import spark.SparkContext
 
-/**
- * Spark program event that can be logged during execution and later replayed using Arthur.
- */
+/** Spark program event that can be logged during execution and later replayed using Arthur. */
 sealed trait EventLogEntry
 
 case class ExceptionEvent(exception: Throwable, task: Task[_]) extends EventLogEntry
-// TODO(ankurdave): Remove location, because RDD already contains creationLocation
-// TODO(ankurdave): Consider renaming to RDDRegistration
-case class RDDCreation(rdd: RDD[_], location: Array[StackTraceElement]) extends EventLogEntry
+case class RDDRegistration(rdd: RDD[_]) extends EventLogEntry
 case class TaskSubmission(tasks: Seq[Task[_]]) extends EventLogEntry
 
 sealed trait ChecksumEvent extends EventLogEntry {
+  /** A hashable key that identifies the entity associated with the checksum event. */
   def key: Any
-  def mismatch(other: ChecksumEvent): Boolean
-  def warningString: String
   def checksum: Int
+  /** Returns true if this event has the same key but a different checksum than the given event. */
+  def mismatch(other: ChecksumEvent): Boolean
+  /** The string to print if this event mismatches with a previous event. */
+  def warningString: String
 }
 
-/**
- * Checksum of the accumulator updates of a ShuffleMapTask.
- */
+/** Checksum of the accumulator updates of a ShuffleMapTask. */
 case class ShuffleMapTaskChecksum(
   rddId: Int,
   partition: Int,
@@ -66,9 +63,6 @@ case class ResultTaskChecksum(
      "on RDD %d, partition %d".format(rddId, partition))
 }
 
-/**
- * Checksum of a block.
- */
 case class BlockChecksum(
   blockId: String,
   checksum: Int

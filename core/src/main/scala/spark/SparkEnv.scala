@@ -4,7 +4,7 @@ import akka.actor.ActorSystem
 
 import spark.debugger.ActorBasedEventReporter
 import spark.debugger.EventReporter
-import spark.debugger.MockEventReporter
+import spark.debugger.NullEventReporter
 import spark.storage.BlockManager
 import spark.storage.BlockManagerMaster
 import spark.network.ConnectionManager
@@ -75,7 +75,7 @@ object SparkEnv {
     val eventReporter = if (System.getProperty("spark.debugger.enable", "false").toBoolean) {
       new ActorBasedEventReporter(actorSystem, isMaster)
     } else {
-      new MockEventReporter
+      new NullEventReporter
     }
 
     val blockManagerMaster = new BlockManagerMaster(actorSystem, isMaster, isLocal)

@@ -6,15 +6,15 @@ import scala.collection.JavaConversions._
 import scala.collection.mutable
 
 import spark.Logging
-import spark.SparkContext
 import spark.RDD
-import spark.scheduler.Task
+import spark.ShuffleDependency
+import spark.SparkContext
 import spark.scheduler.ResultTask
 import spark.scheduler.ShuffleMapTask
-import spark.ShuffleDependency
+import spark.scheduler.Task
 
 /**
- * Reads events from an event log on disk and processes them.
+ * Reads events from an event log and provides replay debugging.
  */
 class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) extends Logging {
   private val objectInputStream = for {
@@ -23,8 +23,8 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
     if file.exists
   } yield new EventLogInputStream(new FileInputStream(file), sc)
 
-  val events = new mutable.ArrayBuffer[EventLogEntry]
-  val checksumVerifier = new ChecksumVerifier
+  private val events_ = new mutable.ArrayBuffer[EventLogEntry]
+  private val checksumVerifier = new ChecksumVerifier
   private val rdds = new mutable.HashMap[Int, RDD[_]]
 
   // Receive new events as they occur
@@ -35,15 +35,20 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
   /** Looks up an RDD by ID. */
   def rdd(id: Int): RDD[_] = rdds(id)
 
-  def rddIds: Iterable[Int] = rdds.keys
+  /** Set of RDD IDs. */
+  def rddIds: scala.collection.Set[Int] = rdds.keySet
+
+  /** Sequence of events in the event log. */
+  def events: Seq[EventLogEntry] = events_.readOnly
 
   /** List of checksum mismatches. */
   def checksumMismatches: Seq[ChecksumEvent] = checksumVerifier.mismatches
 
   /** Prints a human-readable list of RDDs. */
   def printRDDs() {
-    for (RDDCreation(rdd, location) <- events) {
-      println("#%02d: %-20s %s".format(rdd.id, rddType(rdd), firstExternalElement(location)))
+    for (RDDRegistration(rdd) <- events) {
+      println("#%02d: %-20s %s".format(
+        rdd.id, rddType(rdd), firstExternalElement(rdd.creationLocation)))
     }
   }
 
@@ -62,9 +67,9 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
   }
 
   private def addEvent(event: EventLogEntry) {
-    events += event
+    events_ += event
     event match {
-      case RDDCreation(rdd, location) =>
+      case RDDRegistration(rdd) =>
         // TODO(ankurdave): Check that the RDD ID and shuffle IDs aren't already in use.
         sc.updateRddId(rdd.id)
         for (dep <- rdd.dependencies) dep match {

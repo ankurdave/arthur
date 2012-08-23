@@ -16,8 +16,9 @@ class EventLogWriter extends Logging {
   private var eventLog: Option[EventLogOutputStream] = None
   setEventLogPath(Option(System.getProperty("spark.debugger.logPath")))
   private val checksumVerifier = new ChecksumVerifier
-  val subscribers = new ArrayBuffer[EventLogEntry => Unit]
+  private val subscribers = new ArrayBuffer[EventLogEntry => Unit]
 
+  /** Sets the path where events will be written. If eventLogPath is None, uses a default path. */
   def setEventLogPath(eventLogPath: Option[String]) {
     val path = eventLogPath.getOrElse {
       val dir = System.getProperty("spark.local.dir", System.getProperty("java.io.tmpdir"))
@@ -33,10 +34,12 @@ class EventLogWriter extends Logging {
     }
   }
 
+  /** Registers a callback to be invoked whenever an event is logged. */
   def subscribe(callback: EventLogEntry => Unit) {
     subscribers.append(callback)
   }
 
+  /** Logs the given event and invokes all registered subscribers. */
   def log(entry: EventLogEntry) {
     synchronized {
       for (l <- eventLog) {
@@ -52,6 +55,7 @@ class EventLogWriter extends Logging {
     }
   }
 
+  /** Flushes the event log to disk. */
   def flush() {
     synchronized {
       for (l <- eventLog) {
@@ -60,6 +64,7 @@ class EventLogWriter extends Logging {
     }
   }
 
+  /** Closes the event log file. Subsequent attempts to log events will fail. */
   def stop() {
     synchronized {
       for (l <- eventLog) {

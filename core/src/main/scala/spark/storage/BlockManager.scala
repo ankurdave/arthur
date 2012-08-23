@@ -68,7 +68,7 @@ class BlockLocker(numLockers: Int) {
 class BlockManager(
     val master: BlockManagerMaster,
     val serializer: Serializer,
-    val eventReporter: EventReporter,
+    eventReporter: EventReporter,
     maxMemory: Long)
   extends Logging {
 
@@ -420,10 +420,7 @@ class BlockManager(
       replicate(blockId, bytes, level) 
     }
 
-    // Checksum the block.
-    // TODO(ankurdave): Run this asynchronously, or if writing to disk, checksum while writing to
-    // reduce overhead.
-    // TODO(ankurdave): Consider checksumming even when the data isn't already serialized.
+    // Checksum the block if it's already serialized.
     if (bytes != null) {
       eventReporter.reportBlockChecksum(blockId, bytes.array)
     }
@@ -487,8 +484,6 @@ class BlockManager(
     }
 
     // Checksum the block.
-    // TODO(ankurdave): Run this asynchronously, or if writing to disk, checksum while writing to
-    // reduce overhead.
     eventReporter.reportBlockChecksum(blockId, bytes.array)
    
     // If replication had started, then wait for it to finish

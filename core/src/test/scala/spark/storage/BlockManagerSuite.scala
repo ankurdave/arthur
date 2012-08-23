@@ -11,7 +11,7 @@ import org.scalatest.PrivateMethodTester
 import spark.KryoSerializer
 import spark.SizeEstimator
 import spark.util.ByteBufferInputStream
-import spark.debugger.MockEventReporter
+import spark.debugger.NullEventReporter
 
 class BlockManagerSuite extends FunSuite with BeforeAndAfter with PrivateMethodTester {
   var actorSystem: ActorSystem = null
@@ -50,7 +50,7 @@ class BlockManagerSuite extends FunSuite with BeforeAndAfter with PrivateMethodT
   }
 
   test("manager-master interaction") {
-    val store = new BlockManager(master, new KryoSerializer, new MockEventReporter, 2000)
+    val store = new BlockManager(master, new KryoSerializer, new NullEventReporter, 2000)
     val a1 = new Array[Byte](400)
     val a2 = new Array[Byte](400)
     val a3 = new Array[Byte](400)
@@ -80,7 +80,7 @@ class BlockManagerSuite extends FunSuite with BeforeAndAfter with PrivateMethodT
   }
 
   test("in-memory LRU storage") {
-    val store = new BlockManager(master, new KryoSerializer, new MockEventReporter, 1200)
+    val store = new BlockManager(master, new KryoSerializer, new NullEventReporter, 1200)
     val a1 = new Array[Byte](400)
     val a2 = new Array[Byte](400)
     val a3 = new Array[Byte](400)
@@ -101,7 +101,7 @@ class BlockManagerSuite extends FunSuite with BeforeAndAfter with PrivateMethodT
   }
   
   test("in-memory LRU storage with serialization") {
-    val store = new BlockManager(master, new KryoSerializer, new MockEventReporter, 1200)
+    val store = new BlockManager(master, new KryoSerializer, new NullEventReporter, 1200)
     val a1 = new Array[Byte](400)
     val a2 = new Array[Byte](400)
     val a3 = new Array[Byte](400)
@@ -122,7 +122,7 @@ class BlockManagerSuite extends FunSuite with BeforeAndAfter with PrivateMethodT
   }
   
   test("on-disk storage") {
-    val store = new BlockManager(master, new KryoSerializer, new MockEventReporter, 1200)
+    val store = new BlockManager(master, new KryoSerializer, new NullEventReporter, 1200)
     val a1 = new Array[Byte](400)
     val a2 = new Array[Byte](400)
     val a3 = new Array[Byte](400)
@@ -135,7 +135,7 @@ class BlockManagerSuite extends FunSuite with BeforeAndAfter with PrivateMethodT
   }
 
   test("disk and memory storage") {
-    val store = new BlockManager(master, new KryoSerializer, new MockEventReporter, 1200)
+    val store = new BlockManager(master, new KryoSerializer, new NullEventReporter, 1200)
     val a1 = new Array[Byte](400)
     val a2 = new Array[Byte](400)
     val a3 = new Array[Byte](400)
@@ -149,7 +149,7 @@ class BlockManagerSuite extends FunSuite with BeforeAndAfter with PrivateMethodT
   }
 
   test("disk and memory storage with serialization") {
-    val store = new BlockManager(master, new KryoSerializer, new MockEventReporter, 1200)
+    val store = new BlockManager(master, new KryoSerializer, new NullEventReporter, 1200)
     val a1 = new Array[Byte](400)
     val a2 = new Array[Byte](400)
     val a3 = new Array[Byte](400)
@@ -163,7 +163,7 @@ class BlockManagerSuite extends FunSuite with BeforeAndAfter with PrivateMethodT
   }
 
   test("LRU with mixed storage levels") {
-    val store = new BlockManager(master, new KryoSerializer, new MockEventReporter, 1200)
+    val store = new BlockManager(master, new KryoSerializer, new NullEventReporter, 1200)
     val a1 = new Array[Byte](400)
     val a2 = new Array[Byte](400)
     val a3 = new Array[Byte](400)
@@ -189,7 +189,7 @@ class BlockManagerSuite extends FunSuite with BeforeAndAfter with PrivateMethodT
   }
 
   test("in-memory LRU with streams") {
-    val store = new BlockManager(master, new KryoSerializer, new MockEventReporter, 1200)
+    val store = new BlockManager(master, new KryoSerializer, new NullEventReporter, 1200)
     val list1 = List(new Array[Byte](200), new Array[Byte](200))
     val list2 = List(new Array[Byte](200), new Array[Byte](200))
     val list3 = List(new Array[Byte](200), new Array[Byte](200))
@@ -215,7 +215,7 @@ class BlockManagerSuite extends FunSuite with BeforeAndAfter with PrivateMethodT
   }
 
   test("LRU with mixed storage levels and streams") {
-    val store = new BlockManager(master, new KryoSerializer, new MockEventReporter, 1200)
+    val store = new BlockManager(master, new KryoSerializer, new NullEventReporter, 1200)
     val list1 = List(new Array[Byte](200), new Array[Byte](200))
     val list2 = List(new Array[Byte](200), new Array[Byte](200))
     val list3 = List(new Array[Byte](200), new Array[Byte](200))

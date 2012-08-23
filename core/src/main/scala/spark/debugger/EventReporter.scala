@@ -35,31 +35,31 @@ class EventReporterActor(eventLogWriter: EventLogWriter) extends Actor with Logg
   }
 }
 
+/** Manages event reporting on the master and slaves. Event reporting is thread-safe. */
 trait EventReporter {
-  // Reports an exception when running a task from a slave.
+  /** Reports an exception when running a task from a slave. */
   def reportException(exception: Throwable, task: Task[_])
-  // Reports an exception when running a task locally using LocalScheduler. Can only be called from
-  // the master.
+  /**
+   * Reports an exception when running a task locally using LocalScheduler. Can only be called from
+   * the master.
+   */
   def reportLocalException(exception: Throwable, task: Task[_])
-  // Reports the creation of an RDD. Can only be called from the master.
+  /** Reports the creation of an RDD. Can only be called from the master. */
   def registerRDD(rdd: RDD[_])
-  // Reports the creation of a task. Can only be called from the master.
+  /** Reports the creation of a task. Can only be called from the master. */
   def registerTasks(tasks: Seq[Task[_]])
-  // Reports the checksum of a task's results.
+  /** Reports the checksum of a task's results. */
   def reportTaskChecksum(
     task: Task[_], accumUpdates: mutable.Map[Long, Any], serializedResult: Array[Byte])
-  // Reports the checksum of a block, which is typically created as the output of a task.
+  /** Reports the checksum of a block, which is typically created as the output of a task. */
   def reportBlockChecksum(blockId: String, blockBytes: Array[Byte])
-  // Allows subscription to events as they are logged. Can only be called from the master.
+  /** Allows subscription to events as they are logged. Can only be called from the master. */
   def subscribe(callback: EventLogEntry => Unit)
-  // Closes any resources held by the EventReporter, blocking until completion.
+  /** Closes any resources held by the EventReporter, blocking until completion. */
   def stop()
-  // Whether or not checksumming is enabled.
-  var enableChecksumming: Boolean
 }
 
-// TODO(ankurdave): Consider renaming to NullEventReporter.
-class MockEventReporter extends EventReporter {
+class NullEventReporter extends EventReporter {
   override def reportException(exception: Throwable, task: Task[_]) {}
   override def reportLocalException(exception: Throwable, task: Task[_]) {}
   override def registerRDD(rdd: RDD[_]) {}
@@ -69,34 +69,25 @@ class MockEventReporter extends EventReporter {
   override def reportBlockChecksum(blockId: String, blockBytes: Array[Byte]) {}
   override def subscribe(callback: EventLogEntry => Unit) {}
   override def stop() {}
-  override def enableChecksumming: Boolean = false
-  override def enableChecksumming_=(value: Boolean) {}
 }
 
-/**
- * Manages event reporting on the master and slaves. Event reporting is thread-safe.
- */
-// TODO(ankurdave): Consider splitting the master and slave functionality.
-// TODO(ankurdave): Mock out and unit-test this class.
+// TODO(ankurdave): Consider separating master and slave functionality.
+// TODO(ankurdave): Unit-test this class.
 class ActorBasedEventReporter(
   actorSystem: ActorSystem, isMaster: Boolean) extends EventReporter with Logging {
 
-  val ip: String = System.getProperty("spark.master.host", "localhost")
-  val port: Int = System.getProperty("spark.master.port", "7077").toInt
-  val actorName: String = "EventReporter"
-  override var enableChecksumming = System.getProperty("spark.debugger.checksum", "true").toBoolean
-  val timeout = 10.seconds
-  var eventLogWriter: Option[EventLogWriter] =
+  private val ip: String = System.getProperty("spark.master.host", "localhost")
+  private val port: Int = System.getProperty("spark.master.port", "7077").toInt
+  private val actorName: String = "EventReporter"
+  private val enableChecksumming = System.getProperty("spark.debugger.checksum", "true").toBoolean
+  private val timeout = 10.seconds
+  private var eventLogWriter: Option[EventLogWriter] =
     if (isMaster) {
       Some(new EventLogWriter)
     } else {
       None
     }
-  // IDs of registered RDDs. Only used on the master.
-  val rddIds = new mutable.HashSet[Int]
-
-  // Remote reference to the actor on workers.
-  var reporterActor: ActorRef = if (isMaster) {
+  private var reporterActor: ActorRef = if (isMaster) {
     val actor = actorSystem.actorOf(
       Props(new EventReporterActor(eventLogWriter.get)), name = actorName)
     logInfo("Registered EventReporterActor actor")
@@ -105,6 +96,11 @@ class ActorBasedEventReporter(
     val url = "akka://spark@%s:%s/user/%s".format(ip, port, actorName)
     actorSystem.actorFor(url)
   }
+  /**
+   * IDs of registered RDDs, used when registering an RDD and all its dependencies. Only used on the
+   * master.
+   */
+  private val rddIds = new mutable.HashSet[Int]
 
   override def reportException(exception: Throwable, task: Task[_]) {
     // TODO(ankurdave): The task may refer to an RDD, so sending it through the actor will interfere
@@ -121,7 +117,7 @@ class ActorBasedEventReporter(
     def visit(rdd: RDD[_]) {
       if (!rddIds.contains(rdd.id)) {
         rddIds.add(rdd.id)
-        report(RDDCreation(rdd, rdd.creationLocation))
+        report(RDDRegistration(rdd))
         for (dep <- rdd.dependencies) {
           visit(dep.rdd)
         }
@@ -174,7 +170,6 @@ class ActorBasedEventReporter(
     }
   }
 
-  // Stops the reporter actor and the event log writer.
   override def stop() {
     if (askReporter(StopEventReporter) != true) {
       throw new SparkException("Error reply received from EventReporter")
@@ -186,13 +181,13 @@ class ActorBasedEventReporter(
     reporterActor = null
   }
 
-  // Used for reporting from either the master or a slave.
+  /** Used for reporting from either the master or a slave. */
   private def report(message: EventReporterMessage) {
     // ActorRef.tell is thread-safe.
     reporterActor.tell(message)
   }
 
-  // Used only for reporting from the master.
+  /** Used only for reporting from the master. */
   private def report(entry: EventLogEntry) {
     for (elw <- eventLogWriter) {
       // EventLogWriter.log is thread-safe.
@@ -200,8 +195,10 @@ class ActorBasedEventReporter(
     }
   }
 
-  // Send a message to the reporterActor and get its result within a default timeout, or
-  // throw a SparkException if this fails.
+  /**
+   * Sends a message to the reporterActor and gets its result within a default timeout, or throws a
+   * SparkException if this fails.
+   */
   private def askReporter(message: Any): Any = {
     try {
       val future = reporterActor.ask(message)(timeout)
