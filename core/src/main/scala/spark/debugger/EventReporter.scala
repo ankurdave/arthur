@@ -107,9 +107,9 @@ class ActorBasedEventReporter(
   }
 
   override def reportException(exception: Throwable, task: Task[_]) {
-    // TODO: The task may refer to an RDD, so sending it through the actor will interfere with RDD
-    // back-referencing, causing a duplicate version of the referenced RDD to be serialized. If
-    // tasks had IDs, we could just send those.
+    // TODO(ankurdave): The task may refer to an RDD, so sending it through the actor will interfere
+    // with RDD back-referencing, causing a duplicate version of the referenced RDD to be
+    // serialized. If tasks had IDs, we could just send those.
     report(LogEvent(ExceptionEvent(exception, task)))
   }
 

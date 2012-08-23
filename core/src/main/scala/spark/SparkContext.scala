@@ -398,7 +398,10 @@ class SparkContext(
     nextShuffleId.getAndIncrement()
   }
   
-  /** Moves the next shuffle ID so that it will not conflict with the given id. */
+  /**
+   * Moves the next shuffle ID so that it will not conflict with the given ID. Used when
+   * deserializing an existing RDD.
+   */
   private[spark] def updateShuffleId(id: Int) {
     val delta = id - nextShuffleId.get + 1
     if (delta > 0) {
@@ -413,7 +416,10 @@ class SparkContext(
     nextRddId.getAndIncrement()
   }
 
-  /** Moves the next RDD ID so that it will not conflict with the given id. */
+  /**
+   * Moves the next RDD ID so that it will not conflict with the given ID. Used when deserializing
+   * an existing RDD.
+   */
   private[spark] def updateRddId(id: Int) {
     val delta = id - nextRddId.get + 1
     if (delta > 0) {

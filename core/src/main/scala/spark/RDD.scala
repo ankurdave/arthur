@@ -61,7 +61,7 @@ abstract class RDD[T: ClassManifest](@transient private var sc: SparkContext) ex
   // Methods that must be implemented by subclasses
   def splits: Array[Split]
   def compute(split: Split): Iterator[T]
-  @transient @LocallyPersistent val dependencies: List[Dependency[_]]
+  @transient @debugger.EventLogSerializable val dependencies: List[Dependency[_]]
   
   // Optionally overridden by subclasses to specify how they are partitioned
   val partitioner: Option[Partitioner] = None
@@ -379,6 +379,10 @@ abstract class RDD[T: ClassManifest](@transient private var sc: SparkContext) ex
     sc.runJob(this, (iter: Iterator[T]) => iter.toArray)
   }
 
+  /**
+   * Returns a list of all fields declared by this class and its superclasses, regardless of
+   * visibility. The list is deterministically ordered.
+   */
   private def getDeclaredFieldsRecursively(cls: Class[_]): List[java.lang.reflect.Field] = {
     (cls.getSuperclass match {
       case null => List()
@@ -386,37 +390,43 @@ abstract class RDD[T: ClassManifest](@transient private var sc: SparkContext) ex
     }) ::: cls.getDeclaredFields.toList
   }
 
+  /**
+   * Performs custom serialization of the RDD. When writing to the debug event log, serializes all
+   * fields annotated with debugger.EventLogSerializable, even if they are otherwise transient.
+   */
   private def writeObject(stream: java.io.ObjectOutputStream) {
     stream.defaultWriteObject()
     stream match {
-      case s: EventLogOutputStream => {
+      case s: EventLogOutputStream =>
         for (field <- getDeclaredFieldsRecursively(this.getClass)
              if java.lang.reflect.Modifier.isTransient(field.getModifiers)
-             && field.isAnnotationPresent(classOf[LocallyPersistent])) {
+             && field.isAnnotationPresent(classOf[debugger.EventLogSerializable])) {
           val accessible = field.isAccessible
           field.setAccessible(true)
           stream.writeObject(field.get(this))
           field.setAccessible(accessible)
         }
-      }
       case _ => {}
     }
   }
 
+  /**
+   * Performs custom deserialization of the RDD. When reading from the debug event log, sets the
+   * SparkContext as well as all fields annotated with debugger.EventLogSerializable.
+   */
   private def readObject(stream: java.io.ObjectInputStream) {
     stream.defaultReadObject()
     stream match {
-      case s: EventLogInputStream => {
+      case s: EventLogInputStream =>
         sc = s.sc
         for (field <- getDeclaredFieldsRecursively(this.getClass)
              if java.lang.reflect.Modifier.isTransient(field.getModifiers)
-             && field.isAnnotationPresent(classOf[LocallyPersistent])) {
+             && field.isAnnotationPresent(classOf[debugger.EventLogSerializable])) {
           val accessible = field.isAccessible
           field.setAccessible(true)
           field.set(this, stream.readObject())
           field.setAccessible(accessible)
         }
-      }
       case _ => {}
     }
   }

@@ -30,7 +30,7 @@ class ParallelCollection[T: ClassManifest](
   // cached. It might be worthwhile to write the data to a file in the DFS and read it in the split
   // instead.
 
-  @transient @LocallyPersistent
+  @transient @debugger.EventLogSerializable
   val splits_ = {
     val slices = ParallelCollection.slice(data, numSlices).toArray
     slices.indices.map(i => new ParallelCollectionSplit(id, i, slices(i))).toArray

@@ -44,7 +44,7 @@ class HadoopRDD[K, V](
   
   val serializableConf = new SerializableWritable(conf)
   
-  @transient @LocallyPersistent
+  @transient @debugger.EventLogSerializable
   val splits_ : Array[Split] = {
     val inputFormat = createInputFormat(conf)
     val inputSplits = inputFormat.getSplits(conf, minSplits)

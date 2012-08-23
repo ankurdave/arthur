@@ -13,7 +13,7 @@ class SampledRDD[T: ClassManifest](
     seed: Int)
   extends RDD[T](prev.context) {
 
-  @transient @LocallyPersistent
+  @transient @debugger.EventLogSerializable
   val splits_ = {
     val rg = new Random(seed)
     prev.splits.map(x => new SampledRDDSplit(x, rg.nextInt))

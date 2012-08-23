@@ -65,6 +65,7 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
     events += event
     event match {
       case RDDCreation(rdd, location) =>
+        // TODO(ankurdave): Check that the RDD ID and shuffle IDs aren't already in use.
         sc.updateRddId(rdd.id)
         for (dep <- rdd.dependencies) dep match {
           case shufDep: ShuffleDependency[_,_,_] =>

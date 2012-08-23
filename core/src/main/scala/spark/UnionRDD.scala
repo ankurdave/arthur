@@ -20,7 +20,7 @@ class UnionRDD[T: ClassManifest](
   extends RDD[T](sc)
   with Serializable {
   
-  @transient @LocallyPersistent
+  @transient @debugger.EventLogSerializable
   val splits_ : Array[Split] = {
     val array = new Array[Split](rdds.map(_.splits.size).sum)
     var pos = 0
