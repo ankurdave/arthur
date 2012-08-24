@@ -37,8 +37,8 @@ class EventReporterActor(eventLogWriter: EventLogWriter) extends Actor with Logg
 
 /** Manages event reporting on the master and slaves. Event reporting is thread-safe. */
 trait EventReporter {
-  /** Reports an exception when running a task from a slave. */
-  def reportException(exception: Throwable, task: Task[_])
+  /** Reports an exception when running a task from a slave using the Mesos executor. */
+  def reportException(exception: Throwable, taskId: Long)
   /**
    * Reports an exception when running a task locally using LocalScheduler. Can only be called from
    * the master.
@@ -60,7 +60,7 @@ trait EventReporter {
 }
 
 class NullEventReporter extends EventReporter {
-  override def reportException(exception: Throwable, task: Task[_]) {}
+  override def reportException(exception: Throwable, taskId: Long) {}
   override def reportLocalException(exception: Throwable, task: Task[_]) {}
   override def registerRDD(rdd: RDD[_]) {}
   override def registerTasks(tasks: Seq[Task[_]]) {}
@@ -102,15 +102,12 @@ class ActorBasedEventReporter(
    */
   private val rddIds = new mutable.HashSet[Int]
 
-  override def reportException(exception: Throwable, task: Task[_]) {
-    // TODO(ankurdave): The task may refer to an RDD, so sending it through the actor will interfere
-    // with RDD back-referencing, causing a duplicate version of the referenced RDD to be
-    // serialized. If tasks had IDs, we could just send those.
-    report(LogEvent(ExceptionEvent(exception, task)))
+  override def reportException(exception: Throwable, taskId: Long) {
+    report(LogEvent(RemoteExceptionEvent(exception, taskId)))
   }
 
   override def reportLocalException(exception: Throwable, task: Task[_]) {
-    report(ExceptionEvent(exception, task))
+    report(LocalExceptionEvent(exception, task))
   }
 
   override def registerRDD(newRDD: RDD[_]) {

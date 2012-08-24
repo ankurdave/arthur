@@ -9,7 +9,8 @@ import spark.SparkContext
 /** Spark program event that can be logged during execution and later replayed using Arthur. */
 sealed trait EventLogEntry
 
-case class ExceptionEvent(exception: Throwable, task: Task[_]) extends EventLogEntry
+case class RemoteExceptionEvent(exception: Throwable, taskId: Long) extends EventLogEntry
+case class LocalExceptionEvent(exception: Throwable, task: Task[_]) extends EventLogEntry
 case class RDDRegistration(rdd: RDD[_]) extends EventLogEntry
 case class TaskSubmission(tasks: Seq[Task[_]]) extends EventLogEntry
 
