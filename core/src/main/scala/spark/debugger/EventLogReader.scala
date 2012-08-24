@@ -70,7 +70,9 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
     events_ += event
     event match {
       case RDDRegistration(rdd) =>
-        // TODO(ankurdave): Check that the RDD ID and shuffle IDs aren't already in use.
+        // TODO(ankurdave): Check that the RDD ID and shuffle IDs aren't already in use. This may
+        // happen if the EventLogReader is passed a SparkContext that has previously been used for
+        // some computation.
         sc.updateRddId(rdd.id)
         for (dep <- rdd.dependencies) dep match {
           case shufDep: ShuffleDependency[_,_,_] =>
