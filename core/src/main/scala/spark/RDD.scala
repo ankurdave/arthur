@@ -29,6 +29,8 @@ import it.unimi.dsi.fastutil.objects.{Object2LongOpenHashMap => OLMap}
 
 import spark.debugger.EventLogInputStream
 import spark.debugger.EventLogOutputStream
+import spark.debugger.RDDTagger
+import spark.debugger.Tagged
 import spark.partial.BoundedDouble
 import spark.partial.CountEvaluator
 import spark.partial.GroupedCountEvaluator
@@ -68,6 +70,10 @@ abstract class RDD[T: ClassManifest](@transient private var sc: SparkContext) ex
 
   // Optionally overridden by subclasses to specify placement preferences
   def preferredLocations(split: Split): Seq[String] = Nil
+
+  // Optionally overridden by subclasses to allow tagging each element of the RDD
+  def tagged(tagger: RDDTagger): RDD[Tagged[T]] =
+    throw new UnsupportedOperationException("tagged not implemented")
   
   def context = sc
   
@@ -440,6 +446,8 @@ class MappedRDD[U: ClassManifest, T: ClassManifest](
   override def splits = prev.splits
   override val dependencies = List(new OneToOneDependency(prev))
   override def compute(split: Split) = prev.iterator(split).map(f)
+  override def tagged(tagger: RDDTagger) =
+    new MappedRDD(tagger(prev), (taggedT: Tagged[T]) => taggedT.map(f))
 }
 
 class FlatMappedRDD[U: ClassManifest, T: ClassManifest](
@@ -450,12 +458,16 @@ class FlatMappedRDD[U: ClassManifest, T: ClassManifest](
   override def splits = prev.splits
   override val dependencies = List(new OneToOneDependency(prev))
   override def compute(split: Split) = prev.iterator(split).flatMap(f)
+  override def tagged(tagger: RDDTagger) =
+    new FlatMappedRDD(tagger(prev), (taggedT: Tagged[T]) => taggedT.flatMap(f))
 }
 
 class FilteredRDD[T: ClassManifest](prev: RDD[T], f: T => Boolean) extends RDD[T](prev.context) {
   override def splits = prev.splits
   override val dependencies = List(new OneToOneDependency(prev))
   override def compute(split: Split) = prev.iterator(split).filter(f)
+  override def tagged(tagger: RDDTagger) =
+    new FilteredRDD(tagger(prev), (taggedT: Tagged[T]) => f(taggedT.elem))
 }
 
 class GlommedRDD[T: ClassManifest](prev: RDD[T]) extends RDD[Array[T]](prev.context) {

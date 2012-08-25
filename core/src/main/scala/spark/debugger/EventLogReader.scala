@@ -3,7 +3,9 @@ package spark.debugger
 import java.io._
 
 import scala.collection.JavaConversions._
+import scala.collection.immutable
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 
 import spark.Logging
 import spark.RDD
@@ -23,7 +25,7 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
     if file.exists
   } yield new EventLogInputStream(new FileInputStream(file), sc)
 
-  private val events_ = new mutable.ArrayBuffer[EventLogEntry]
+  private val events_ = new ArrayBuffer[EventLogEntry]
   private val checksumVerifier = new ChecksumVerifier
   private val rdds = new mutable.HashMap[Int, RDD[_]]
 
@@ -63,6 +65,47 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
       } catch {
         case e: EOFException => {}
       }
+    }
+  }
+
+  /**
+   * Selects the elements in startRDD that match p, traces them forward until endRDD, and returns
+   * the resulting members of endRDD.
+   */
+  def traceForward[T, U: ClassManifest](
+      startRDD: RDD[T], p: T => Boolean, endRDD: RDD[U]): RDD[U] = {
+    val taggedEndRDD: RDD[Tagged[U]] = endRDD.tagged(new RDDTagger {
+      def apply[A](prev: RDD[A]): RDD[Tagged[A]] = {
+        tagRDD[A, T](prev, startRDD, p)
+      }
+    })
+    taggedEndRDD.filter(tu => tu.tag.nonEmpty).map(tu => tu.elem)
+  }
+
+  /**
+   * Traces the given element elem from startRDD forward until endRDD and returns the resulting
+   * members of endRDD.
+   */
+  def traceForward[T, U: ClassManifest](startRDD: RDD[T], elem: T, endRDD: RDD[U]): RDD[U] =
+    traceForward(startRDD, { (x: T) => x == elem }, endRDD)
+
+  private def tagRDD[A, T](rdd: RDD[A], startRDD: RDD[T], p: T => Boolean): RDD[Tagged[A]] = {
+    if (rdd.id == startRDD.id) {
+      // (prev: RDD[A]) is the same as (startRDD: RDD[T]), so T is the same as A, so we can cast
+      // RDD[Tagged[T]] to RDD[Tagged[A]]
+      tagElements(startRDD, p).asInstanceOf[RDD[Tagged[A]]]
+    } else {
+      rdd.tagged(new RDDTagger {
+        def apply[B](prev: RDD[B]): RDD[Tagged[B]] = {
+          tagRDD[B, T](prev, startRDD, p)
+        }
+      })
+    }
+  }
+
+  private def tagElements[T](rdd: RDD[T], p: T => Boolean): RDD[Tagged[T]] = {
+    new UniquelyTaggedRDD(rdd).map {
+      case Tagged(elem, tag) => Tagged(elem, if (p(elem)) tag else immutable.HashSet.empty)
     }
   }
 

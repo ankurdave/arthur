@@ -207,4 +207,28 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     assert(r.events.collect { case e: ChecksumEvent => e }.isEmpty)
     stopSparkContext(sc2)
   }
+
+  test("forward tracing (simple)") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make an RDD and transform it
+    val sc = makeSparkContext(eventLog)
+    val a = sc.makeRDD(List(1, 2, 3, 4, 5, 6)).map(_ - 1)
+    val b = a.flatMap(x => List.tabulate(x) { i => x }).filter(_ % 2 == 0)
+    b.collect()
+    stopSparkContext(sc)
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val startRDD = r.rdd(a.id).asInstanceOf[RDD[Int]]
+    val endRDD = r.rdd(b.id).asInstanceOf[RDD[Int]]
+    val descendantsOf4 = r.traceForward(startRDD, 4, endRDD).collect()
+    assert(descendantsOf4 === Array(4, 4, 4, 4))
+    val descendantsOf5 = r.traceForward(startRDD, 5, endRDD).collect()
+    assert(descendantsOf5 === Array())
+    stopSparkContext(sc2)
+  }
 }
