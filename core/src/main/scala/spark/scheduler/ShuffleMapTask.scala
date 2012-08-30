@@ -62,12 +62,12 @@ object ShuffleMapTask {
 }
 
 class ShuffleMapTask(
-    stageId: Int,
+    stageId_ : Int,
     var rdd: RDD[_], 
     var dep: ShuffleDependency[_,_,_],
     var partition: Int, 
     @transient var locs: Seq[String])
-  extends Task[BlockManagerId](stageId)
+  extends Task[BlockManagerId](stageId_)
   with Externalizable
   with Logging {
 
@@ -90,7 +90,7 @@ class ShuffleMapTask(
   }
 
   override def readExternal(in: ObjectInput) {
-    val stageId = in.readInt()
+    stageId = in.readInt()
     val numBytes = in.readInt()
     val bytes = new Array[Byte](numBytes)
     in.readFully(bytes)

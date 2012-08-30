@@ -73,7 +73,7 @@ abstract class RDD[T: ClassManifest](@transient private var sc: SparkContext) ex
 
   // Optionally overridden by subclasses to allow tagging each element of the RDD
   def tagged(tagger: RDDTagger): RDD[Tagged[T]] =
-    throw new UnsupportedOperationException("tagged not implemented")
+    throw new UnsupportedOperationException("tagged not implemented on " + this)
   
   def context = sc
   

@@ -36,6 +36,9 @@ import org.apache.hadoop.mapreduce.TaskAttemptID
 import org.apache.hadoop.mapreduce.TaskAttemptContext
 
 import spark.SparkContext._
+import spark.debugger.RDDTagger
+import spark.debugger.SamePartitionMappedRDD
+import spark.debugger.Tagged
 import spark.partial.BoundedDouble
 import spark.partial.PartialResult
 
@@ -206,8 +209,8 @@ class PairRDDFunctions[K: ClassManifest, V: ClassManifest](
   }
   
   def cogroup[W](other: RDD[(K, W)], partitioner: Partitioner): RDD[(K, (Seq[V], Seq[W]))] = {
-    val cg = new CoGroupedRDD[K](
-        Seq(self.asInstanceOf[RDD[(_, _)]], other.asInstanceOf[RDD[(_, _)]]),
+    val cg = new CoGroupedRDD[K, Any](
+        Seq[RDD[(K, A)] forSome { type A }](self, other),
         partitioner)
     val prfs = new PairRDDFunctions[K, Seq[Seq[_]]](cg)(classManifest[K], Manifests.seqSeqManifest)
     prfs.mapValues {
@@ -218,10 +221,8 @@ class PairRDDFunctions[K: ClassManifest, V: ClassManifest](
   
   def cogroup[W1, W2](other1: RDD[(K, W1)], other2: RDD[(K, W2)], partitioner: Partitioner)
       : RDD[(K, (Seq[V], Seq[W1], Seq[W2]))] = {
-    val cg = new CoGroupedRDD[K](
-        Seq(self.asInstanceOf[RDD[(_, _)]],
-            other1.asInstanceOf[RDD[(_, _)]], 
-            other2.asInstanceOf[RDD[(_, _)]]),
+    val cg = new CoGroupedRDD[K, Any](
+        Seq[RDD[(K, A)] forSome { type A }](self, other1, other2),
         partitioner)
     val prfs = new PairRDDFunctions[K, Seq[Seq[_]]](cg)(classManifest[K], Manifests.seqSeqManifest)
     prfs.mapValues {
@@ -440,6 +441,10 @@ class MappedValuesRDD[K, V, U](prev: RDD[(K, V)], f: V => U) extends RDD[(K, U)]
   override val dependencies = List(new OneToOneDependency(prev))
   override val partitioner = prev.partitioner
   override def compute(split: Split) = prev.iterator(split).map{case (k, v) => (k, f(v))}
+  override def tagged(tagger: RDDTagger) =
+    new SamePartitionMappedRDD(tagger(prev), (taggedPair: Tagged[(K, V)]) => taggedPair match {
+      case Tagged((k, v), tag) => Tagged((k, f(v)), tag)
+    })
 }
 
 class FlatMappedValuesRDD[K, V, U](prev: RDD[(K, V)], f: V => TraversableOnce[U])

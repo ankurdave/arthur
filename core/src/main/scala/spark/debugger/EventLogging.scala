@@ -75,7 +75,7 @@ case class BlockChecksum(
     case _ => false
   }
   def warningString =
-    ("Nondeterminism detected in block %d".format(blockId))
+    ("Nondeterminism detected in block %s".format(blockId))
 }
 
 /**

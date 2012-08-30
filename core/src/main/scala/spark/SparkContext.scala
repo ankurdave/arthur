@@ -440,6 +440,14 @@ class SparkContext(
       nextRddId.addAndGet(delta)
     }
   }
+
+  /**
+   * Moves the next stage ID so that it will not conflict with the given ID. Used when deserializing
+   * an existing task.
+   */
+  private[spark] def updateStageId(id: Int) {
+    dagScheduler.updateStageId(id)
+  }
 }
 
 /**

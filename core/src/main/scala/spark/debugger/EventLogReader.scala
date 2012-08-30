@@ -56,6 +56,7 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
 
   /** Reads any new events from the event log. */
   def loadNewEvents() {
+    logDebug("Loading new events from " + eventLogPath)
     for (ois <- objectInputStream) {
       try {
         while (true) {
@@ -74,11 +75,7 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
    */
   def traceForward[T, U: ClassManifest](
       startRDD: RDD[T], p: T => Boolean, endRDD: RDD[U]): RDD[U] = {
-    val taggedEndRDD: RDD[Tagged[U]] = endRDD.tagged(new RDDTagger {
-      def apply[A](prev: RDD[A]): RDD[Tagged[A]] = {
-        tagRDD[A, T](prev, startRDD, p)
-      }
-    })
+    val taggedEndRDD: RDD[Tagged[U]] = tagRDD[U, T](endRDD, startRDD, p)
     taggedEndRDD.filter(tu => tu.tag.nonEmpty).map(tu => tu.elem)
   }
 
@@ -116,15 +113,28 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
         // TODO(ankurdave): Check that the RDD ID and shuffle IDs aren't already in use. This may
         // happen if the EventLogReader is passed a SparkContext that has previously been used for
         // some computation.
+        logDebug("Updating RDD ID to be greater than " + rdd.id)
         sc.updateRddId(rdd.id)
-        for (dep <- rdd.dependencies) dep match {
-          case shufDep: ShuffleDependency[_,_,_] =>
-            sc.updateShuffleId(shufDep.shuffleId)
-          case _ => {}
+        rdd.dependencies.collect {
+          case shufDep: ShuffleDependency[_,_,_] => shufDep.shuffleId
+        } match {
+          case Seq() => {}
+          case shuffleIds =>
+            val maxShuffleId = shuffleIds.max
+            logDebug("Updating shuffle ID to be greater than " + maxShuffleId)
+            sc.updateShuffleId(maxShuffleId)
         }
         rdds(rdd.id) = rdd
       case c: ChecksumEvent =>
         checksumVerifier.verify(c)
+      case t: TaskSubmission =>
+        t.tasks.map(_.stageId) match {
+          case Seq() => {}
+          case stageIds =>
+            val maxStageId = stageIds.max
+            logDebug("Updating stage ID to be greater than " + maxStageId)
+            sc.updateStageId(maxStageId)
+        }
       case _ => {}
     }
   }

@@ -98,6 +98,13 @@ class DAGScheduler(taskSched: TaskScheduler) extends TaskSchedulerListener with 
     cacheLocs = cacheTracker.getLocationsSnapshot()
   }
 
+  def updateStageId(id: Int) {
+    val delta = id - nextStageId.get + 1
+    if (delta > 0) {
+      nextStageId.addAndGet(delta)
+    }
+  }
+
   /**
    * Get or create a shuffle map stage for the given shuffle dependency's map side.
    * The priority value passed in will be used if the stage doesn't already exist with

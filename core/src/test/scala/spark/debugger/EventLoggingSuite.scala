@@ -231,4 +231,32 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     assert(descendantsOf5 === Array())
     stopSparkContext(sc2)
   }
+
+  test("forward tracing (CoGroupedRDD)") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make a CoGroupedRDD and transform it
+    val sc = makeSparkContext(eventLog)
+    val a = sc.makeRDD(List((1, 2), (3, 4), (5, 6)))
+    val b = sc.makeRDD(List((1, 1), (3, 3), (6, 6)))
+    val c = a.cogroup(b)
+    c.collect()
+    stopSparkContext(sc)
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val a2 = r.rdd(a.id).asInstanceOf[RDD[(Int, Int)]]
+    val b2 = r.rdd(b.id).asInstanceOf[RDD[(Int, Int)]]
+    val c2 = r.rdd(c.id).asInstanceOf[RDD[(Int, (Seq[Int], Seq[Int]))]]
+
+    // Tag it
+    val descendantsOf12 = r.traceForward(a2, (1, 2), c2).collect()
+    assert(descendantsOf12 === Array((1, (List(2), List(1)))))
+    val descendantsOf66 = r.traceForward(b2, (6, 6), c2).collect()
+    assert(descendantsOf66 === Array((6, (List(), List(6)))))
+    stopSparkContext(sc2)
+  }
 }

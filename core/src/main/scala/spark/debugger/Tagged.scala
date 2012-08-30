@@ -6,6 +6,7 @@ import spark.OneToOneDependency
 import spark.RDD
 import spark.Split
 
+// TODO(ankurdave): Improve Tagged.toString
 case class Tagged[+A](val elem: A, val tag: immutable.HashSet[Int]) extends Product2[Any, Any] {
   def map[B](f: A => B): Tagged[B] = Tagged(f(elem), tag)
 
@@ -54,8 +55,10 @@ class UniquelyTaggedRDD[T](prev: RDD[T]) extends RDD[Tagged[T]](prev.context) {
   private val numSplits = splits.length
 }
 
-/** Maps the prev RDD assuming that f keeps the element in the same partition. This allows it to reuse the partitioner. */
-/*
+/**
+ * Maps the prev RDD assuming that f keeps the element in the same partition. This allows it to
+ * reuse the partitioner.
+ */
 class SamePartitionMappedRDD[U: ClassManifest, T: ClassManifest](
     prev: RDD[T],
     f: T => U)
@@ -63,11 +66,8 @@ class SamePartitionMappedRDD[U: ClassManifest, T: ClassManifest](
 
   override def splits = prev.splits
   override val dependencies = List(new OneToOneDependency(prev))
-  override def mapDependencies(g: RDD ~> RDD) = new SamePartitionMappedRDD(g(prev), f)
-  override val partitioner = prev.partitioner
+  // override val partitioner = prev.partitioner
   override def compute(split: Split) = prev.iterator(split).map(f)
   override def tagged(tagger: RDDTagger) =
-    new SamePartitionMappedRDD(tagger(prev), (tt: Tagged[T]) => tt.map(f))
-  reportCreation()
+    new SamePartitionMappedRDD(tagger(prev), (taggedT: Tagged[T]) => taggedT.map(f))
 }
-*/
