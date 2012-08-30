@@ -39,6 +39,7 @@ import spark.SparkContext._
 import spark.debugger.RDDTagger
 import spark.debugger.SamePartitionMappedRDD
 import spark.debugger.Tagged
+import spark.debugger.OrderedTagged
 import spark.partial.BoundedDouble
 import spark.partial.PartialResult
 
@@ -434,6 +435,12 @@ class SortedRDD[K <% Ordered[K], V](prev: RDD[(K, V)], ascending: Boolean)
     prev.iterator(split).toArray
       .sortWith((x, y) => if (ascending) x._1 < y._1 else x._1 > y._1).iterator
   }
+
+  override def tagged(tagger: RDDTagger): RDD[Tagged[(K, V)]] = {
+    val taggedPrev = tagger(prev).map { case Tagged((k, v), tag) => (OrderedTagged(k, tag), v) }
+    val sorted = new SortedRDD(taggedPrev, ascending)
+    sorted.map { case (OrderedTagged(k, tag), v) => Tagged((k, v), tag) }
+  }
 } 
  
 class MappedValuesRDD[K, V, U](prev: RDD[(K, V)], f: V => U) extends RDD[(K, U)](prev.context) {
@@ -456,6 +463,20 @@ class FlatMappedValuesRDD[K, V, U](prev: RDD[(K, V)], f: V => TraversableOnce[U]
 
   override def compute(split: Split) = {
     prev.iterator(split).flatMap { case (k, v) => f(v).map(x => (k, x)) }
+  }
+
+  override def tagged(tagger: RDDTagger): RDD[Tagged[(K, U)]] = {
+    val taggedPrev: RDD[(K, Tagged[V])] =
+      new SamePartitionMappedRDD(tagger(prev), (tp: Tagged[(K, V)]) => tp match {
+        case Tagged((k, v), tag) => (k, Tagged(v, tag))
+      })
+    val fmv: RDD[(K, Tagged[U])] =
+      new FlatMappedValuesRDD(taggedPrev, (tv: Tagged[V]) => tv match {
+        case Tagged(v, tag) => f(v).map(u => Tagged(u, tag))
+      })
+    new SamePartitionMappedRDD(fmv, (pair: (K, Tagged[U])) => pair match {
+      case (k, Tagged(u, tag)) => Tagged((k, u), tag)
+    })
   }
 }
 

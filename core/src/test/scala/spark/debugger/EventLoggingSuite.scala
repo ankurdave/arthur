@@ -259,4 +259,72 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     assert(descendantsOf66 === Array((6, (List(), List(6)))))
     stopSparkContext(sc2)
   }
+
+  test("forward tracing (SortedRDD)") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make a SortedRDD and transform it
+    val sc = makeSparkContext(eventLog)
+    val a = sc.makeRDD(List((3, 1), (2, 1), (1, 1)))
+    val b = a.sortByKey()
+    b.collect()
+    stopSparkContext(sc)
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val a2 = r.rdd(a.id).asInstanceOf[RDD[(Int, Int)]]
+    val b2 = r.rdd(b.id).asInstanceOf[RDD[(Int, Int)]]
+    val descendantsOf31 = r.traceForward(a2, (3, 1), b2).collect()
+    assert(descendantsOf31 === Array((3, 1)))
+    stopSparkContext(sc2)
+  }
+
+  test("forward tracing ([Flat]MappedValuesRDD)") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make a MappedValuesRDD and a FlatMappedValuesRDD
+    val sc = makeSparkContext(eventLog)
+    val a = sc.makeRDD(List((3, 1), (2, 2), (1, 1)))
+    val b = a.mapValues(v => v + 1).flatMapValues(v => List.tabulate(v) { i => v })
+    b.collect()
+    stopSparkContext(sc)
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val a2 = r.rdd(a.id).asInstanceOf[RDD[(Int, Int)]]
+    val b2 = r.rdd(b.id).asInstanceOf[RDD[(Int, Int)]]
+    val descendantsOf22 = r.traceForward(a2, (2, 2), b2).collect()
+    assert(descendantsOf22 === Array((2, 3), (2, 3), (2, 3)))
+    stopSparkContext(sc2)
+  }
+
+  test("forward tracing (ShuffledRDD)") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make a ShuffledRDD
+    val sc = makeSparkContext(eventLog)
+    val a = sc.makeRDD(List((3, 1), (2, 2), (1, 1), (1, 2)))
+    val b = a.reduceByKey(_ + _, 4)
+    b.collect()
+    stopSparkContext(sc)
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val a2 = r.rdd(a.id).asInstanceOf[RDD[(Int, Int)]]
+    val b2 = r.rdd(b.id).asInstanceOf[RDD[(Int, Int)]]
+    val descendantsOf11 = r.traceForward(a2, (1, 1), b2).collect()
+    assert(descendantsOf11 === Array((1, 3)))
+    val descendantsOf12 = r.traceForward(a2, (1, 2), b2).collect()
+    assert(descendantsOf12 === Array((1, 3)))
+    stopSparkContext(sc2)
+  }
 }

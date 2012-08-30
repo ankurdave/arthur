@@ -28,14 +28,13 @@ object Tagged {
   type Tag = Int
   type TagSet = immutable.HashSet[Tag]
 }
-/*
+
 case class OrderedTagged[A <% Ordered[A]](
   val elem: A,
   val tag: immutable.HashSet[Int]
 ) extends Ordered[OrderedTagged[A]] {
   def compare(that: OrderedTagged[A]) = this.elem.compare(that.elem)
 }
-*/
 
 trait RDDTagger {
   def apply[A](a: RDD[A]): RDD[Tagged[A]]
