@@ -29,7 +29,7 @@ class EventLogWriter extends Logging {
       logInfo("Writing to event log %s".format(path))
       eventLog = Some(new EventLogOutputStream(new FileOutputStream(file)))
     } else {
-      logWarning("Event log %s already exists".format(path))
+      logWarning("Event log %s already exists, future log entries will be dropped".format(path))
       eventLog = None
     }
   }

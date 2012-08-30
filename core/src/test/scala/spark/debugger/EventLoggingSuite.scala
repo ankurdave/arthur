@@ -27,15 +27,6 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
   val prevProperties: mutable.Map[String, String] = new mutable.HashMap[String, String]
   val propertiesToRestore: immutable.Set[String] = immutable.HashSet(
     "spark.debugger.enable", "spark.debugger.logPath", "spark.debugger.checksum")
-  after {
-    for (prop <- propertiesToRestore; value <- prevProperties.get(prop)) {
-      if (value == null) {
-        System.clearProperty(prop)
-      } else {
-        System.setProperty(prop, value)
-      }
-    }
-  }
 
   def makeSparkContext(
     eventLog: File,
@@ -53,7 +44,15 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     new SparkContext("local", "test")
   }
 
-  def setSystemProperty(property: String, value: String) {
+  def stopSparkContext(sc: SparkContext) {
+    sc.stop()
+    for (prop <- propertiesToRestore; value <- prevProperties.get(prop)) {
+      if (value == null) {
+        System.clearProperty(prop)
+      } else {
+        System.setProperty(prop, value)
+      }
+    }
   }
 
   test("restore ParallelCollection from log") {
@@ -66,13 +65,13 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     val nums = sc.makeRDD(1 to 4)
     // Run an operation on the RDD so the scheduler becomes aware of it
     nums.collect()
-    sc.stop()
+    stopSparkContext(sc)
 
     // Read it back from the event log
     val sc2 = makeSparkContext(eventLog)
     val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
     assert(r.rdd(nums.id).collect.toList === (1 to 4).toList)
-    sc2.stop()
+    stopSparkContext(sc2)
   }
 
   test("set nextRddId and nextShuffleId after restoring") {
@@ -86,7 +85,7 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     val numsMapped = nums.map(x => (x, x + 1))
     val numsReduced = numsMapped.reduceByKey(_ + _)
     numsReduced.collect()
-    sc.stop()
+    stopSparkContext(sc)
 
     // Read them back from the event log
     val sc2 = makeSparkContext(eventLog)
@@ -105,7 +104,7 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
       case _ =>
         fail()
     }
-    sc2.stop()
+    stopSparkContext(sc2)
   }
 
   test("checksum verification") {
@@ -118,7 +117,7 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     val nums = sc.makeRDD(1 to 4)
     val numsNondeterministic = nums.map(x => math.random)
     val collected = numsNondeterministic.collect
-    sc.stop()
+    stopSparkContext(sc)
 
     // Read them back from the event log
     val sc2 = makeSparkContext(eventLog)
@@ -126,7 +125,7 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     assert(r.rdd(nums.id).collect.toList === (1 to 4).toList)
     assert(r.rdd(numsNondeterministic.id).collect.toList != collected.toList)
     // Ensure that all checksums have gone through
-    sc2.stop()
+    stopSparkContext(sc2)
 
     // Make sure we found a checksum mismatch
     assert(r.checksumMismatches.nonEmpty)
@@ -141,14 +140,14 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     val sc = makeSparkContext(eventLog)
     val rdd = sc.makeRDD(1 to 4).map(x => (x, x * x)).partitionBy(new HashPartitioner(4))
     rdd.collect()
-    sc.stop()
+    stopSparkContext(sc)
 
     // Read them back from the event log and recompute them
     val sc2 = makeSparkContext(eventLog)
     val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
     r.rdd(rdd.id).collect()
     // Ensure that all checksums have gone through
-    sc2.stop()
+    stopSparkContext(sc2)
 
     // Make sure we didn't find any checksum mismatches
     assert(r.checksumMismatches.isEmpty)
@@ -164,14 +163,14 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     val nums = sc.makeRDD(List(1, 2, 3))
     val nums2 = nums.map(_ * 2)
     val nums2List = nums2.collect.toList
-    sc.stop()
+    stopSparkContext(sc)
 
     // Verify that tasks were logged
     val sc2 = makeSparkContext(eventLog)
     val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
     val tasks = r.events.collect { case t: TaskSubmission => t }
     assert(tasks.nonEmpty)
-    sc2.stop()
+    stopSparkContext(sc2)
   }
 
   test("disable debugging") {
@@ -183,13 +182,13 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     val sc = makeSparkContext(eventLog, enableDebugging = false)
     val nums = sc.makeRDD(1 to 4)
     nums.collect()
-    sc.stop()
+    stopSparkContext(sc)
 
     // Make sure the event log is empty
     val sc2 = makeSparkContext(eventLog)
     val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
     assert(r.events.isEmpty)
-    sc2.stop()
+    stopSparkContext(sc2)
   }
 
   test("disable checksumming") {
@@ -200,12 +199,12 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     // Make an RDD
     val sc = makeSparkContext(eventLog, enableChecksumming = false)
     val nums = sc.makeRDD(1 to 4).collect()
-    sc.stop()
+    stopSparkContext(sc)
 
     // Make sure the event log has no checksums
     val sc2 = makeSparkContext(eventLog)
     val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
     assert(r.events.collect { case e: ChecksumEvent => e }.isEmpty)
-    sc2.stop()
+    stopSparkContext(sc2)
   }
 }
