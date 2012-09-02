@@ -327,4 +327,97 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     assert(descendantsOf12 === Array((1, 3)))
     stopSparkContext(sc2)
   }
+
+  test("backward tracing (simple)") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make an RDD and transform it
+    val sc = makeSparkContext(eventLog)
+    val a = sc.makeRDD(List(1, 2, 3, 4, 5, 6))
+    val b = a.map(_ - 1).flatMap(x => List.tabulate(x) { i => x }).filter(_ % 2 == 0)
+    b.collect()
+    sc.stop()
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val a2 = r.rdd(a.id).asInstanceOf[RDD[Int]]
+    val b2 = r.rdd(b.id).asInstanceOf[RDD[Int]]
+    val ancestorsOf4 = r.traceBackward(a2, 4, b2).collect()
+    assert(ancestorsOf4.toSet === Set(5))
+    val ancestorsOf5 = r.traceBackward(a2, 5, b2).collect()
+    assert(ancestorsOf5 === Array())
+    sc2.stop()
+  }
+
+  test("backward tracing (ShuffledRDD)") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make a ShuffledRDD
+    val sc = makeSparkContext(eventLog)
+    val a = sc.makeRDD(List((3, 1), (2, 2), (1, 1), (1, 2)))
+    val b = a.reduceByKey(_ + _, 4)
+    b.collect()
+    sc.stop()
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val a2 = r.rdd(a.id).asInstanceOf[RDD[(Int, Int)]]
+    val b2 = r.rdd(b.id).asInstanceOf[RDD[(Int, Int)]]
+    val ancestorsOf11 = r.traceBackward(a2, (1, 3), b2).collect()
+    assert(ancestorsOf11.toSet === Set((1, 1), (1, 2)))
+    sc2.stop()
+  }
+
+  test("backward tracing ([Flat]MappedValuesRDD)") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make a MappedValuesRDD and a FlatMappedValuesRDD
+    val sc = makeSparkContext(eventLog)
+    val a = sc.makeRDD(List((3, 1), (2, 2), (1, 1)))
+    val b = a.mapValues(v => v + 1).flatMapValues(v => List.tabulate(v) { i => v })
+    b.collect()
+    sc.stop()
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val a2 = r.rdd(a.id).asInstanceOf[RDD[(Int, Int)]]
+    val b2 = r.rdd(b.id).asInstanceOf[RDD[(Int, Int)]]
+    val ancestorsOf23 = r.traceBackward(a2, (2, 3), b2).collect()
+    assert(ancestorsOf23.toSet === Set((2, 2)))
+    sc2.stop()
+  }
+
+  test("backward tracing (CoGroupedRDD)") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    // Make a CoGroupedRDD and transform it
+    val sc = makeSparkContext(eventLog)
+    val a = sc.parallelize(List((1, 2), (3, 4), (5, 6)))
+    val b = sc.parallelize(List((1, 1), (3, 3), (6, 6)))
+    val c = a.groupWith(b)
+    c.collect()
+    sc.stop()
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val a2 = r.rdd(a.id).asInstanceOf[RDD[(Int, Int)]]
+    val b2 = r.rdd(b.id).asInstanceOf[RDD[(Int, Int)]]
+    val c2 = r.rdd(c.id).asInstanceOf[RDD[(Int, (Seq[Int], Seq[Int]))]]
+    c2.collect()
+    val result = r.traceBackward(a2, (1, (Seq(2), Seq(1))), c2).collect()
+    assert(result.toSet === Set((1, 2)))
+    sc2.stop()
+  }
 }

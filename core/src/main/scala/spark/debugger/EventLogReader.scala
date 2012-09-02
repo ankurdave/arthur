@@ -86,6 +86,24 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
   def traceForward[T, U: ClassManifest](startRDD: RDD[T], elem: T, endRDD: RDD[U]): RDD[U] =
     traceForward(startRDD, { (x: T) => x == elem }, endRDD)
 
+  /**
+   * Selects the elements in endRDD that match p, traces them backward until startRDD, and returns
+   * the resulting members of startRDD.
+   */
+  def traceBackward[T: ClassManifest, U: ClassManifest](startRDD: RDD[T], p: U => Boolean, endRDD: RDD[U]): RDD[T] = {
+    val taggedEndRDD: RDD[Tagged[U]] = tagRDD[U, T](endRDD, startRDD, (t: T) => true)
+    val tags = sc.broadcast(taggedEndRDD.filter(tu => p(tu.elem)).map(tu => tu.tag).fold(immutable.HashSet[Int]())(_ union _))
+    val taggedStartRDD = new UniquelyTaggedRDD(startRDD)
+    taggedStartRDD.filter(tt => (tags.value intersect tt.tag).nonEmpty).map(tt => tt.elem)
+  }
+
+  /**
+   * Traces the given element elem from endRDD backward until startRDD and returns the resulting
+   * members of startRDD.
+   */
+  def traceBackward[T: ClassManifest, U: ClassManifest](startRDD: RDD[T], elem: U, endRDD: RDD[U]): RDD[T] =
+    traceBackward(startRDD, { (x: U) => x == elem }, endRDD)
+
   private def tagRDD[A, T](rdd: RDD[A], startRDD: RDD[T], p: T => Boolean): RDD[Tagged[A]] = {
     if (rdd.id == startRDD.id) {
       // (prev: RDD[A]) is the same as (startRDD: RDD[T]), so T is the same as A, so we can cast
