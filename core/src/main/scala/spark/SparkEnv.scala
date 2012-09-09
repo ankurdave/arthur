@@ -2,12 +2,13 @@ package spark
 
 import akka.actor.ActorSystem
 
+import spark.broadcast.BroadcastManager
 import spark.debugger.ActorBasedEventReporter
 import spark.debugger.EventReporter
 import spark.debugger.NullEventReporter
+import spark.network.ConnectionManager
 import spark.storage.BlockManager
 import spark.storage.BlockManagerMaster
-import spark.network.ConnectionManager
 import spark.util.AkkaUtils
 
 class SparkEnv (
@@ -19,6 +20,7 @@ class SparkEnv (
     val mapOutputTracker: MapOutputTracker,
     val shuffleFetcher: ShuffleFetcher,
     val shuffleManager: ShuffleManager,
+    val broadcastManager: BroadcastManager,
     val blockManager: BlockManager,
     val connectionManager: ConnectionManager,
     val eventReporter: EventReporter
@@ -27,7 +29,7 @@ class SparkEnv (
   /** No-parameter constructor for unit tests. */
   def this() = {
     this(null, null, new JavaSerializer, new JavaSerializer, null, null, null, null, null, null,
-      null)
+      null, null)
   }
 
   def stop() {
@@ -35,6 +37,7 @@ class SparkEnv (
     cacheTracker.stop()
     shuffleFetcher.stop()
     shuffleManager.stop()
+    broadcastManager.stop()
     blockManager.stop()
     blockManager.master.stop()
     eventReporter.stop()
@@ -86,6 +89,8 @@ object SparkEnv {
     
     val shuffleManager = new ShuffleManager()
 
+    val broadcastManager = new BroadcastManager(isMaster)
+
     val closureSerializerClass =
       System.getProperty("spark.closure.serializer", "spark.JavaSerializer")
     val closureSerializer =
@@ -131,6 +136,7 @@ object SparkEnv {
       mapOutputTracker,
       shuffleFetcher,
       shuffleManager,
+      broadcastManager,
       blockManager,
       connectionManager,
       eventReporter)
