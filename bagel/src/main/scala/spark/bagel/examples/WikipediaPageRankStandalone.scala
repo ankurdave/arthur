@@ -1,26 +1,30 @@
 package spark.bagel.examples
 
-import spark._
-import spark.SparkContext._
-
-import spark.bagel._
-import spark.bagel.Bagel._
-
+import scala.collection.mutable.ArrayBuffer
 import scala.xml.{XML,NodeSeq}
 
-import scala.collection.mutable.ArrayBuffer
-
-import java.io.{InputStream, OutputStream, DataInputStream, DataOutputStream}
+import java.io._
 import java.nio.ByteBuffer
 
+import spark.SparkContext._
+import spark._
+import spark.bagel.Bagel._
+import spark.bagel._
+import spark.util.ByteBufferInputStream
+
+/**
+ * Runs PageRank on the articles in the  given Freebase WEX-formatted
+ * dump of Wikipedia.
+ *
+ * For best performance, use the custom serializer by setting the
+ * spark.serializer property to spark.bagel.examples.WPRSerializer.
+ */
 object WikipediaPageRankStandalone {
   def main(args: Array[String]) {
     if (args.length < 5) {
       System.err.println("Usage: WikipediaPageRankStandalone <inputFile> <threshold> <numIterations> <host> <usePartitioner>")
       System.exit(-1)
     }
-
-    System.setProperty("spark.serializer", "spark.bagel.examples.WPRSerializer")
 
     val inputFile = args(0)
     val threshold = args(1).toDouble
@@ -30,23 +34,28 @@ object WikipediaPageRankStandalone {
     val sc = new SparkContext(host, "WikipediaPageRankStandalone")
 
     val input = sc.textFile(inputFile)
+    logDebug("Created input")
+    logDebug("Number of articles: " + input.count())
     val partitioner = new HashPartitioner(sc.defaultParallelism)
     val links =
       if (usePartitioner)
         input.map(parseArticle _).partitionBy(partitioner).cache
       else
         input.map(parseArticle _).cache
+    logDebug("Created links")
     val n = links.count
     val defaultRank = 1.0 / n
     val a = 0.15
 
     // Do the computation
     val startTime = System.currentTimeMillis
+    logDebug("Running PageRank")
     val ranks =
         pageRank(links, numIterations, defaultRank, a, n, partitioner, usePartitioner, sc.defaultParallelism)
 
     // Print the result
     System.err.println("Articles with PageRank >= "+threshold+":")
+    logDebug("Collecting results")
     val top =
       (ranks
        .filter { case (id, rank) => rank >= threshold }
@@ -91,6 +100,7 @@ object WikipediaPageRankStandalone {
   ): RDD[(String, Double)] = {
     var ranks = links.mapValues { edges => defaultRank }
     for (i <- 1 to numIterations) {
+      logDebug("Starting iteration " + i)
       val contribs = links.groupWith(ranks).flatMap {
         case (id, (linksWrapper, rankWrapper)) =>
           if (linksWrapper.length > 0) {
@@ -119,15 +129,23 @@ class WPRSerializer extends spark.Serializer {
 
 class WPRSerializerInstance extends SerializerInstance {
   def serialize[T](t: T): ByteBuffer = {
-    throw new UnsupportedOperationException()
+    val bos = new ByteArrayOutputStream()
+    val out = serializeStream(bos)
+    out.writeObject(t)
+    out.close()
+    ByteBuffer.wrap(bos.toByteArray)
   }
 
   def deserialize[T](bytes: ByteBuffer): T = {
-    throw new UnsupportedOperationException()
+    val bis = new ByteBufferInputStream(bytes)
+    val in = deserializeStream(bis)
+    in.readObject().asInstanceOf[T]
   }
 
   def deserialize[T](bytes: ByteBuffer, loader: ClassLoader): T = {
-    throw new UnsupportedOperationException()
+    val bis = new ByteBufferInputStream(bytes)
+    val in = deserializeStream(bis, loader)
+    in.readObject().asInstanceOf[T]
   }
 
   def serializeStream(s: OutputStream): SerializationStream = {
@@ -135,42 +153,48 @@ class WPRSerializerInstance extends SerializerInstance {
   }
 
   def deserializeStream(s: InputStream): DeserializationStream = {
-    new WPRDeserializationStream(s)
+    new WPRDeserializationStream(s, Thread.currentThread.getContextClassLoader)
+  }
+
+  def deserializeStream(s: InputStream, loader: ClassLoader): DeserializationStream = {
+    new WPRDeserializationStream(s, loader)
   }
 }
 
 class WPRSerializationStream(os: OutputStream) extends SerializationStream {
   val dos = new DataOutputStream(os)
+  val jss = new JavaSerializationStream(os)
 
   def writeObject[T](t: T): Unit = t match {
-    case (id: String, wrapper: ArrayBuffer[_]) => wrapper(0) match {
-      case links: Array[String] => {
-        dos.writeInt(0) // links
-        dos.writeUTF(id)
-        dos.writeInt(links.length)
-        for (link <- links) {
-          dos.writeUTF(link)
-        }
+    case (id: String, ArrayBuffer(links: Array[String])) =>
+      dos.writeInt(0)
+      dos.writeUTF(id)
+      dos.writeInt(links.length)
+      for (link <- links) {
+        dos.writeUTF(link)
       }
-      case rank: Double => {
-        dos.writeInt(1) // rank
-        dos.writeUTF(id)
-        dos.writeDouble(rank)
-      }
-    }
-    case (id: String, rank: Double) => {
-      dos.writeInt(2) // rank without wrapper
+    case (id: String, ArrayBuffer(rank: Double)) =>
+      dos.writeInt(1)
       dos.writeUTF(id)
       dos.writeDouble(rank)
-    }
+    case (id: String, rank: Double) =>
+      dos.writeInt(2)
+      dos.writeUTF(id)
+      dos.writeDouble(rank)
+    case _ =>
+      dos.writeInt(3)
+      dos.flush()
+      jss.writeObject(t)
+      jss.flush()
   }
 
   def flush() { dos.flush() }
   def close() { dos.close() }
 }
 
-class WPRDeserializationStream(is: InputStream) extends DeserializationStream {
+class WPRDeserializationStream(is: InputStream, loader: ClassLoader) extends DeserializationStream {
   val dis = new DataInputStream(is)
+  val jds = new JavaDeserializationStream(is, loader)
 
   def readObject[T](): T = {
     val typeId = dis.readInt()
@@ -194,7 +218,9 @@ class WPRDeserializationStream(is: InputStream) extends DeserializationStream {
         val id = dis.readUTF()
         val rank = dis.readDouble()
         (id, rank).asInstanceOf[T]
-     }
+      }
+      case 3 =>
+        jds.readObject()
     }
   }
 
