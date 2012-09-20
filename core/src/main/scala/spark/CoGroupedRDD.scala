@@ -124,7 +124,8 @@ class CoGroupedRDD[K, V](
       (pair: (K, Seq[Seq[Tagged[V1]] forSome { type V1 <: V }])) => pair match {
         case (k, seqSeqTagged) =>
           val tag =
-            (for (seqTagged <- seqSeqTagged; tagged <- seqTagged) yield tagged.tag).reduce(_ | _)
+            (for (seqTagged <- seqSeqTagged; tagged <- seqTagged)
+             yield tagged.tag).reduce(_ union _)
           val untaggedValues = seqSeqTagged.map(seqTagged => seqTagged.map(tagged => tagged.elem))
           Tagged((k, untaggedValues), tag)
       }

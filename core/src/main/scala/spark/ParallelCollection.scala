@@ -5,6 +5,7 @@ import scala.collection.immutable.NumericRange
 import scala.collection.mutable.ArrayBuffer
 
 import spark.debugger.RDDTagger
+import spark.debugger.Tag
 import spark.debugger.Tagged
 
 class ParallelCollectionSplit[T: ClassManifest](
@@ -49,7 +50,7 @@ class ParallelCollection[T: ClassManifest](
   override val dependencies: List[Dependency[_]] = Nil
 
   override def tagged(tagger: RDDTagger) =
-    this.map(t => Tagged(t, immutable.HashSet()))
+    this.map(t => Tagged(t, new Tag()))
 }
 
 private object ParallelCollection {

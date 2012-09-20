@@ -449,9 +449,12 @@ class MappedValuesRDD[K, V, U](prev: RDD[(K, V)], f: V => U) extends RDD[(K, U)]
   override val partitioner = prev.partitioner
   override def compute(split: Split) = prev.iterator(split).map{case (k, v) => (k, f(v))}
   override def tagged(tagger: RDDTagger) =
-    new SamePartitionMappedRDD(tagger(prev), (taggedPair: Tagged[(K, V)]) => taggedPair match {
-      case Tagged((k, v), tag) => Tagged((k, f(v)), tag)
-    })
+    new SamePartitionMappedRDD(
+      tagger(prev),
+      (taggedPair: Tagged[(K, V)]) => taggedPair match {
+        case Tagged((k, v), tag) => Tagged((k, f(v)), tag)
+      }
+    )
 }
 
 class FlatMappedValuesRDD[K, V, U](prev: RDD[(K, V)], f: V => TraversableOnce[U])

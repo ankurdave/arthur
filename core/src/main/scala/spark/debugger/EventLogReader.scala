@@ -75,8 +75,9 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
    */
   def traceForward[T, U: ClassManifest](
       startRDD: RDD[T], p: T => Boolean, endRDD: RDD[U]): RDD[U] = {
-    val taggedEndRDD: RDD[Tagged[U]] = tagRDD[U, T](endRDD, startRDD, p)
-    taggedEndRDD.filter(tu => tu.tag.nonEmpty).map(tu => tu.elem)
+    val taggedEndRDD: RDD[Tagged[U]] = tagRDD[U, T](
+      endRDD, startRDD, startRDD.map((t: T) => Tagged(t, new BooleanTag(p(t)))))
+    taggedEndRDD.filter(tu => tu.tag.isTagged).map(tu => tu.elem)
   }
 
   /**
@@ -90,29 +91,36 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
    * Selects the elements in endRDD that match p, traces them backward until startRDD, and returns
    * the resulting members of startRDD.
    */
-  def traceBackward[T: ClassManifest, U: ClassManifest](startRDD: RDD[T], p: U => Boolean, endRDD: RDD[U]): RDD[T] = {
-    val taggedEndRDD: RDD[Tagged[U]] = tagRDD[U, T](endRDD, startRDD, (t: T) => true)
-    val tags = sc.broadcast(taggedEndRDD.filter(tu => p(tu.elem)).map(tu => tu.tag).fold(immutable.HashSet[Int]())(_ union _))
+  def traceBackward[T: ClassManifest, U: ClassManifest](
+      startRDD: RDD[T], p: U => Boolean, endRDD: RDD[U]): RDD[T] = {
+    val taggedEndRDD: RDD[Tagged[U]] = tagRDD[U, T](
+      endRDD, startRDD, tagElements(startRDD, (t: T) => true))
+    val tags = sc.broadcast(
+      taggedEndRDD.filter(tu => p(tu.elem)).map(tu => tu.tag).fold(new IntSetTag())(_ union _))
     val taggedStartRDD = new UniquelyTaggedRDD(startRDD)
-    taggedStartRDD.filter(tt => (tags.value intersect tt.tag).nonEmpty).map(tt => tt.elem)
+    taggedStartRDD.filter(tt => (tags.value intersect tt.tag).isTagged).map(tt => tt.elem)
   }
 
   /**
    * Traces the given element elem from endRDD backward until startRDD and returns the resulting
    * members of startRDD.
    */
-  def traceBackward[T: ClassManifest, U: ClassManifest](startRDD: RDD[T], elem: U, endRDD: RDD[U]): RDD[T] =
+  def traceBackward[T: ClassManifest, U: ClassManifest](
+      startRDD: RDD[T], elem: U, endRDD: RDD[U]): RDD[T] =
     traceBackward(startRDD, { (x: U) => x == elem }, endRDD)
 
-  private def tagRDD[A, T](rdd: RDD[A], startRDD: RDD[T], p: T => Boolean): RDD[Tagged[A]] = {
+  private def tagRDD[A, T](
+      rdd: RDD[A],
+      startRDD: RDD[T],
+      taggedStartRDD: RDD[Tagged[T]]): RDD[Tagged[A]] = {
     if (rdd.id == startRDD.id) {
-      // (prev: RDD[A]) is the same as (startRDD: RDD[T]), so T is the same as A, so we can cast
+      // (rdd: RDD[A]) is the same as (startRDD: RDD[T]), so T is the same as A, so we can cast
       // RDD[Tagged[T]] to RDD[Tagged[A]]
-      tagElements(startRDD, p).asInstanceOf[RDD[Tagged[A]]]
+      taggedStartRDD.asInstanceOf[RDD[Tagged[A]]]
     } else {
       rdd.tagged(new RDDTagger {
         def apply[B](prev: RDD[B]): RDD[Tagged[B]] = {
-          tagRDD[B, T](prev, startRDD, p)
+          tagRDD[B, T](prev, startRDD, taggedStartRDD)
         }
       })
     }
@@ -120,7 +128,7 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
 
   private def tagElements[T](rdd: RDD[T], p: T => Boolean): RDD[Tagged[T]] = {
     new UniquelyTaggedRDD(rdd).map {
-      case Tagged(elem, tag) => Tagged(elem, if (p(elem)) tag else immutable.HashSet.empty)
+      case Tagged(elem, tag) => Tagged(elem, if (p(elem)) tag else IntSetTag.empty)
     }
   }
 
