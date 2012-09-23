@@ -50,7 +50,7 @@ class ParallelCollection[T: ClassManifest](
   override val dependencies: List[Dependency[_]] = Nil
 
   override def tagged(tagger: RDDTagger) =
-    this.map(t => Tagged(t, new Tag()))
+    this.map(t => Tagged(t, Tag.empty))
 }
 
 private object ParallelCollection {

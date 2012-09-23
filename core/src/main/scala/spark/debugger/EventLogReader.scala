@@ -76,7 +76,7 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
   def traceForward[T, U: ClassManifest](
       startRDD: RDD[T], p: T => Boolean, endRDD: RDD[U]): RDD[U] = {
     val taggedEndRDD: RDD[Tagged[U]] = tagRDD[U, T](
-      endRDD, startRDD, startRDD.map((t: T) => Tagged(t, new BooleanTag(p(t)))))
+      endRDD, startRDD, startRDD.map((t: T) => Tagged(t, BooleanTag(p(t)))))
     taggedEndRDD.filter(tu => tu.tag.isTagged).map(tu => tu.elem)
   }
 
@@ -96,7 +96,7 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
     val taggedEndRDD: RDD[Tagged[U]] = tagRDD[U, T](
       endRDD, startRDD, tagElements(startRDD, (t: T) => true))
     val tags = sc.broadcast(
-      taggedEndRDD.filter(tu => p(tu.elem)).map(tu => tu.tag).fold(new IntSetTag())(_ union _))
+      taggedEndRDD.filter(tu => p(tu.elem)).map(tu => tu.tag).fold(IntSetTag.empty)(_ union _))
     val taggedStartRDD = new UniquelyTaggedRDD(startRDD)
     taggedStartRDD.filter(tt => (tags.value intersect tt.tag).isTagged).map(tt => tt.elem)
   }

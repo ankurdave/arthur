@@ -15,13 +15,17 @@ case class Tagged[+A](val elem: A, val tag: Tag) {
     for (newElem <- f(elem)) yield Tagged(newElem, tag)
 }
 
-class Tag extends Serializable {
+class Tag protected () extends Serializable {
   def union(other: Tag): Tag = this
   def intersect(other: Tag): Tag = this
   def isTagged: Boolean = false
 }
 
-class IntSetTag extends Tag {
+object Tag {
+  val empty = new Tag()
+}
+
+class IntSetTag private () extends Tag {
   private var tags: immutable.HashSet[Int] = immutable.HashSet()
 
   def this(tags: immutable.HashSet[Int]) = {
@@ -49,7 +53,7 @@ class IntSetTag extends Tag {
       case ist: IntSetTag =>
         new IntSetTag(tags intersect ist.tags)
       case t: Tag =>
-        new IntSetTag()
+        IntSetTag.empty
       case _ =>
         throw new UnsupportedOperationException(
           "Can't intersect IntSetTag %s with Tag %s".format(this, other))
@@ -63,10 +67,10 @@ object IntSetTag {
   val empty = new IntSetTag()
 }
 
-class BooleanTag extends Tag {
+class BooleanTag private () extends Tag {
   private var tag: Boolean = false
 
-  def this(tag: Boolean) = {
+  private def this(tag: Boolean) = {
     this()
     this.tag = tag
   }
@@ -74,7 +78,7 @@ class BooleanTag extends Tag {
   override def union(other: Tag): BooleanTag = {
     other match {
       case bt: BooleanTag =>
-        new BooleanTag(tag || bt.tag)
+        BooleanTag(tag || bt.tag)
       case t: Tag =>
         this
       case _ =>
@@ -86,9 +90,9 @@ class BooleanTag extends Tag {
   override def intersect(other: Tag): BooleanTag = {
     other match {
       case bt: BooleanTag =>
-        new BooleanTag(tag && bt.tag)
+        BooleanTag(tag && bt.tag)
       case t: Tag =>
-        new BooleanTag(false)
+        BooleanTag(false)
       case _ =>
         throw new UnsupportedOperationException(
           "Can't intersect BooleanTag %s with Tag %s".format(this, other))
@@ -96,6 +100,12 @@ class BooleanTag extends Tag {
   }
 
   override def isTagged: Boolean = tag
+}
+
+object BooleanTag {
+  val falseTag = new BooleanTag(false)
+  val trueTag = new BooleanTag(true)
+  def apply(tag: Boolean): BooleanTag = if (tag) trueTag else falseTag
 }
 
 case class OrderedTagged[A <% Ordered[A]](val elem: A, val tag: Tag)

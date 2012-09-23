@@ -193,7 +193,10 @@ class KryoSerializer extends Serializer with Logging {
       StorageLevel.MEMORY_ONLY_DESER,
       PutBlock("1", ByteBuffer.allocate(1), StorageLevel.MEMORY_ONLY_DESER),
       GotBlock("1", ByteBuffer.allocate(1)),
-      GetBlock("1")
+      GetBlock("1"),
+      debugger.BooleanTag.falseTag,
+      debugger.BooleanTag.trueTag,
+      debugger.IntSetTag.empty
     )
     for (obj <- toRegister) {
       kryo.register(obj.getClass)
