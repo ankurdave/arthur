@@ -9,6 +9,7 @@ import scala.collection.mutable.ArrayBuffer
 
 import spark.Logging
 import spark.RDD
+import spark.Dependency
 import spark.ShuffleDependency
 import spark.SparkContext
 import spark.scheduler.ResultTask
@@ -92,13 +93,28 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
    * the resulting members of startRDD.
    */
   def traceBackward[T: ClassManifest, U: ClassManifest](
-      startRDD: RDD[T], p: U => Boolean, endRDD: RDD[U]): RDD[T] = {
-    val taggedEndRDD: RDD[Tagged[U]] = tagRDD[U, T](
-      endRDD, startRDD, tagElements(startRDD, (t: T) => true))
-    val tags = sc.broadcast(
-      taggedEndRDD.filter(tu => p(tu.elem)).map(tu => tu.tag).fold(IntSetTag.empty)(_ union _))
-    val taggedStartRDD = new UniquelyTaggedRDD(startRDD)
-    taggedStartRDD.filter(tt => (tags.value intersect tt.tag).isTagged).map(tt => tt.elem)
+      startRDD: RDD[T],
+      p: U => Boolean,
+      endRDD: RDD[U]): RDD[T] = {
+    if (endRDD.id == startRDD.id) {
+      // Casts between RDD[U] and RDD[T] are legal because startRDD is the same as endRDD, so T is
+      // the same as U
+      startRDD.asInstanceOf[RDD[U]].filter(p).asInstanceOf[RDD[T]]
+    } else {
+      val (taggedEndRDD, firstRDDInStage) = tagRDDWithinStage(
+        endRDD, startRDD, getParentStageRDDs(endRDD))
+      // TODO: find the set of partitions of endRDD that contain elements that match p
+      val tags = sc.broadcast(taggedEndRDD.filter(tu => p(tu.elem)).map(tu => tu.tag)
+        .fold(IntSetTag.empty)(_ union _))
+      val sourceElems = new UniquelyTaggedRDD(firstRDDInStage)
+        .filter(taggedElem => (tags.value intersect taggedElem.tag).isTagged)
+        .map((tx: Tagged[_]) => tx.elem).collect()
+      // Casting from RDD[_] to RDD[Any] is legal because RDD is essentially covariant
+      traceBackward[T, Any](
+        startRDD,
+        (x: Any) => sourceElems.contains(x),
+        firstRDDInStage.asInstanceOf[RDD[Any]])
+    }
   }
 
   /**
@@ -108,6 +124,40 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
   def traceBackward[T: ClassManifest, U: ClassManifest](
       startRDD: RDD[T], elem: U, endRDD: RDD[U]): RDD[T] =
     traceBackward(startRDD, { (x: U) => x == elem }, endRDD)
+
+  private def tagRDDWithinStage[A, T](
+      rdd: RDD[A],
+      startRDD: RDD[T],
+      parentStageRDDs: Set[RDD[_]]): (RDD[Tagged[A]], RDD[_]) = {
+    if (!rddPathExists(startRDD, rdd)) {
+      (rdd.map(elem => Tagged(elem, IntSetTag.empty)), startRDD)
+    } else if (rdd.id == startRDD.id || parentStageRDDs.contains(rdd)) {
+      (new UniquelyTaggedRDD(rdd), rdd)
+    } else {
+      val dependencyResults = new ArrayBuffer[RDD[_]]
+      val taggedRDD = rdd.tagged(new RDDTagger {
+        def apply[B](prev: RDD[B]): RDD[Tagged[B]] = {
+          val (taggedPrev, firstRDDInStage) =
+            tagRDDWithinStage[B, T](prev, startRDD, parentStageRDDs)
+          dependencyResults += firstRDDInStage
+          taggedPrev
+        }
+      })
+      (taggedRDD, dependencyResults.max(new Ordering[RDD[_]] {
+        def compare(x: RDD[_], y: RDD[_]): Int = x.id - y.id
+      }))
+    }
+  }
+
+  private def rddPathExists(startRDD: RDD[_], endRDD: RDD[_]): Boolean = {
+    if (startRDD.id == endRDD.id) {
+      true
+    } else {
+      (for (dep <- endRDD.dependencies; rdd = dep.rdd) yield rdd).foldLeft(false) {
+        (acc, rdd) => acc || rddPathExists(startRDD, rdd)
+      }
+    }
+  }
 
   private def tagRDD[A, T](
       rdd: RDD[A],
@@ -124,6 +174,29 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
         }
       })
     }
+  }
+
+  /** Takes an RDD and returns a set of RDDs representing the parent stages. */
+  private def getParentStageRDDs(rdd: RDD[_]): Set[RDD[_]] = {
+    val ancestorDeps = new mutable.HashSet[Dependency[_]]
+    val visited = new mutable.HashSet[RDD[_]]
+    def visit(r: RDD[_]) {
+      if (!visited(r)) {
+        visited += r
+        for (dep <- r.dependencies) {
+          dep match {
+            case shufDep: ShuffleDependency[_,_,_] =>
+              ancestorDeps.add(shufDep)
+            case _ =>
+              visit(dep.rdd)
+          }
+        }
+      }
+    }
+    visit(rdd)
+    // toSet is necessary because for some reason Scala doesn't think a mutable.HashSet[RDD[_]] is a
+    // Set[RDD[_]]
+    ancestorDeps.map(_.rdd).toSet
   }
 
   private def tagElements[T](rdd: RDD[T], p: T => Boolean): RDD[Tagged[T]] = {
