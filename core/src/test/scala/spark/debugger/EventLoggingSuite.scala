@@ -406,7 +406,11 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     val a = sc.parallelize(List((1, 2), (3, 4), (5, 6)))
     val b = sc.parallelize(List((1, 1), (3, 3), (6, 6)))
     val c = a.groupWith(b)
-    c.collect()
+    // Take the common-case (Seq(v), Seq(w)) to simply (v, w)
+    val d = c.flatMapValues {
+      case (vs, ws) => for (v <- vs.headOption; w <- ws.headOption) yield (v, w)
+    }
+    d.collect()
     sc.stop()
 
     // Trace some elements and verify the results
@@ -415,9 +419,11 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     val a2 = r.rdd(a.id).asInstanceOf[RDD[(Int, Int)]]
     val b2 = r.rdd(b.id).asInstanceOf[RDD[(Int, Int)]]
     val c2 = r.rdd(c.id).asInstanceOf[RDD[(Int, (Seq[Int], Seq[Int]))]]
-    c2.collect()
-    val result = r.traceBackward(a2, (1, (Seq(2), Seq(1))), c2).collect()
-    assert(result.toSet === Set((1, 2)))
+    val d2 = r.rdd(d.id).asInstanceOf[RDD[(Int, (Int, Int))]]
+    val result1 = r.traceBackward(a2, (1, (Seq(2), Seq(1))), c2).collect()
+    assert(result1.toSet === Set((1, 2)))
+    val result2 = r.traceBackward(a2, (1, (2, 1)), d2).collect()
+    assert(result2.toSet === Set((1, 2)))
     sc2.stop()
   }
 }
