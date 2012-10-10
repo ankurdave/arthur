@@ -20,20 +20,27 @@ import spark.scheduler.Task
  * Reads events from an event log and provides replay debugging.
  */
 class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) extends Logging {
-  private val objectInputStream = for {
-    elp <- eventLogPath orElse { Option(System.getProperty("spark.debugger.logPath")) }
-    file = new File(elp)
-    if file.exists
-  } yield new EventLogInputStream(new FileInputStream(file), sc)
-
   private val events_ = new ArrayBuffer[EventLogEntry]
   private val checksumVerifier = new ChecksumVerifier
   private val rdds = new mutable.HashMap[Int, RDD[_]]
 
+  private def getEventLogPath(): String =
+    eventLogPath orElse { Option(System.getProperty("spark.debugger.logPath")) } match {
+      case Some(elp) => elp
+      case None => throw new UnsupportedOperationException("No event log path provided")
+    }
+  private var objectInputStream: EventLogInputStream = {
+    val file = new File(getEventLogPath())
+    if (file.exists) {
+      new EventLogInputStream(new FileInputStream(file), sc)
+    } else {
+      throw new UnsupportedOperationException("Event log %s does not exist")
+    }
+  }
+  loadNewEvents()
+
   // Receive new events as they occur
   sc.env.eventReporter.subscribe(addEvent _)
-
-  loadNewEvents()
 
   /** Looks up an RDD by ID. */
   def rdd(id: Int): RDD[_] = rdds(id)
@@ -57,16 +64,14 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
 
   /** Reads any new events from the event log. */
   def loadNewEvents() {
-    logDebug("Loading new events from " + eventLogPath)
-    for (ois <- objectInputStream) {
-      try {
-        while (true) {
-          val event = ois.readObject.asInstanceOf[EventLogEntry]
-          addEvent(event)
-        }
-      } catch {
-        case e: EOFException => {}
+    logDebug("Loading new events from " + getEventLogPath())
+    try {
+      while (true) {
+        val event = objectInputStream.readObject.asInstanceOf[EventLogEntry]
+        addEvent(event)
       }
+    } catch {
+      case e: EOFException => {}
     }
   }
 
@@ -214,14 +219,18 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
         // some computation.
         logDebug("Updating RDD ID to be greater than " + rdd.id)
         sc.updateRddId(rdd.id)
-        rdd.dependencies.collect {
-          case shufDep: ShuffleDependency[_,_,_] => shufDep.shuffleId
-        } match {
-          case Seq() => {}
-          case shuffleIds =>
-            val maxShuffleId = shuffleIds.max
-            logDebug("Updating shuffle ID to be greater than " + maxShuffleId)
-            sc.updateShuffleId(maxShuffleId)
+        if (rdd.dependencies != null) {
+          rdd.dependencies.collect {
+            case shufDep: ShuffleDependency[_,_,_] => shufDep.shuffleId
+          } match {
+            case Seq() => {}
+            case shuffleIds =>
+              val maxShuffleId = shuffleIds.max
+              logDebug("Updating shuffle ID to be greater than " + maxShuffleId)
+              sc.updateShuffleId(maxShuffleId)
+          }
+        } else {
+          logError("Dependency list for RDD %d (%s) is null".format(rdd.id, rdd))
         }
         rdds(rdd.id) = rdd
       case c: ChecksumEvent =>

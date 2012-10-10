@@ -18,12 +18,16 @@ class EventLogWriter extends Logging {
   private val checksumVerifier = new ChecksumVerifier
   private val subscribers = new ArrayBuffer[EventLogEntry => Unit]
 
-  /** Sets the path where events will be written. If eventLogPath is None, uses a default path. */
+  /**
+   * Sets the path where events will be written. If eventLogPath is None, uses a default path. Sets
+   * the spark.debugger.logPath property to this path.
+   */
   def setEventLogPath(eventLogPath: Option[String]) {
     val path = eventLogPath.getOrElse {
       val dir = System.getProperty("spark.local.dir", System.getProperty("java.io.tmpdir"))
       new File(dir, "spark-debugger-event-log-" + UUID.randomUUID).getPath
     }
+    System.setProperty("spark.debugger.logPath", path)
     val file = new File(path)
     if (!file.exists) {
       logInfo("Writing to event log %s".format(path))
