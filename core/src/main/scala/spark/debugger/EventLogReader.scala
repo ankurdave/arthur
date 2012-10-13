@@ -94,10 +94,20 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
     traceForward(startRDD, { (x: T) => x == elem }, endRDD)
 
   /**
-   * Selects the elements in endRDD that match p, traces them backward until startRDD, and returns
-   * the resulting members of startRDD.
+   * Traces the given element elem from endRDD backward until startRDD and returns the resulting
+   * members of startRDD.
    */
   def traceBackward[T: ClassManifest, U: ClassManifest](
+      startRDD: RDD[T], elem: U, endRDD: RDD[U]): RDD[T] =
+    traceBackwardMaintainingSet(startRDD, { (x: U) => x == elem }, endRDD)
+
+  /**
+   * Selects the elements in endRDD that match p, traces them backward until startRDD, and returns
+   * the resulting members of startRDD. Implemented by backward-tracing the elements in each stage
+   * starting from the last one and maintaining the set of elements of interest from one stage to
+   * the previous stage.
+   */
+  def traceBackwardMaintainingSet[T: ClassManifest, U: ClassManifest](
       startRDD: RDD[T],
       p: U => Boolean,
       endRDD: RDD[U]): RDD[T] = {
@@ -115,7 +125,7 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
         .filter(taggedElem => (tags.value intersect taggedElem.tag).isTagged)
         .map((tx: Tagged[_]) => tx.elem).collect()
       // Casting from RDD[_] to RDD[Any] is legal because RDD is essentially covariant
-      traceBackward[T, Any](
+      traceBackwardMaintainingSet[T, Any](
         startRDD,
         (x: Any) => sourceElems.contains(x),
         firstRDDInStage.asInstanceOf[RDD[Any]])
@@ -123,12 +133,20 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
   }
 
   /**
-   * Traces the given element elem from endRDD backward until startRDD and returns the resulting
-   * members of startRDD.
+   * Selects the elements in endRDD that match p, traces them backward until startRDD, and returns
+   * the resulting members of startRDD. Implemented by uniquely tagging the elements of startRDD,
+   * tracing the tags all the way to endRDD in a single step, and returning the elements in startRDD
+   * whose tags ended up on the elements of interest in endRDD.
    */
-  def traceBackward[T: ClassManifest, U: ClassManifest](
-      startRDD: RDD[T], elem: U, endRDD: RDD[U]): RDD[T] =
-    traceBackward(startRDD, { (x: U) => x == elem }, endRDD)
+  def traceBackwardSingleStep[T: ClassManifest, U: ClassManifest](
+      startRDD: RDD[T], p: U => Boolean, endRDD: RDD[U]): RDD[T] = {
+    val taggedEndRDD: RDD[Tagged[U]] = tagRDD[U, T](
+      endRDD, startRDD, tagElements(startRDD, (t: T) => true))
+    val tags = sc.broadcast(
+      taggedEndRDD.filter(tu => p(tu.elem)).map(tu => tu.tag).fold(IntSetTag.empty)(_ union _))
+    val taggedStartRDD = new UniquelyTaggedRDD(startRDD)
+    taggedStartRDD.filter(tt => (tags.value intersect tt.tag).isTagged).map(tt => tt.elem)
+  }
 
   private def tagRDDWithinStage[A, T](
       rdd: RDD[A],
