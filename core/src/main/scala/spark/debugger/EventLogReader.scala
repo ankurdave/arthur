@@ -150,11 +150,10 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
   }
 
   /**
-   * For each stage, produces a mapping from integers representing the elements in the first RDD of
-   * the stage, to tags propagated from the first RDD of the previous stage to the current
-   * RDD. Returns the list of such mappings, one per stage, starting from the first stage. For each
-   * stage, along with the mapping from the previous stage to the current stage, returns the tagged
-   * start RDD of the stage and the tagged end RDD.
+   * For each stage, produces a mapping from tags propagated from the first RDD of the previous
+   * stage to the current RDD, to single-element tags representing the elements in the first RDD of
+   * the stage. Returns the list of such mappings, one per stage, along with the tagged start RDD of
+   * the stage and the tagged end RDD.
    */
   def buildBackwardTraceMappings(
       startRDD: RDD[_], endRDD: RDD[_])
