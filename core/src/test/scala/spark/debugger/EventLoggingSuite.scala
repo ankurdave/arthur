@@ -426,4 +426,59 @@ class EventLoggingSuite extends FunSuite with BeforeAndAfter {
     assert(result2.toSet === Set((1, 2)))
     sc2.stop()
   }
+
+  test("buildBackwardTraceMappings") {
+    // Initialize event log
+    val tempDir = Files.createTempDir()
+    val eventLog = new File(tempDir, "eventLog")
+
+    val sc = makeSparkContext(eventLog)
+    val a = sc.parallelize(List(("foo", 1), ("bar", 2), ("foo", 1), ("baz", 3)))
+    val b = a.groupByKey()
+    val c = b.groupByKey()
+    val d = c.groupByKey()
+    d.collect()
+    sc.stop()
+
+    // Trace some elements and verify the results
+    val sc2 = makeSparkContext(eventLog)
+    val r = new EventLogReader(sc2, Some(eventLog.getAbsolutePath))
+    val a2 = r.rdd(a.id).asInstanceOf[RDD[(String, Int)]]
+    val b2 = r.rdd(b.id).asInstanceOf[RDD[(String, Seq[Int])]]
+    val c2 = r.rdd(c.id).asInstanceOf[RDD[(String, Seq[Seq[Int]])]]
+    val d2 = r.rdd(d.id).asInstanceOf[RDD[(String, Seq[Seq[Seq[Int]]])]]
+    val stages = r.buildBackwardTraceMappings(a2, d2)
+    assert(stages.length === 3)
+
+    val (mapping1, start1, end1) = stages(0)
+    assert(mapping1 === None)
+    val start1Collected = start1.collect.toSet
+    val end1Collected = end1.collect.toSet
+    assert(start1Collected.map(_.elem) === a2.collect.toSet)
+    assert(end1Collected.map(_.elem) === b2.collect.toSet)
+
+    def verifyMapping(oldRDD: Set[Tagged[_]], newRDD: Set[Tagged[_]], mapping: RDD[(Tag, Tag)]) {
+      for ((oldTag, newTag) <- mapping.collect()) {
+        val elemsWithOldTag = oldRDD.find(_.tag == oldTag).map(_.elem)
+        val elemsWithNewTag = newRDD.find(_.tag == newTag).map(_.elem)
+        assert(elemsWithOldTag === elemsWithNewTag)
+      }
+    }
+
+    val (Some(mapping2), start2, end2) = stages(1)
+    val start2Collected = start2.collect().toSet
+    val end2Collected = end2.collect().toSet
+    assert(start2Collected.map(_.elem) === b2.collect().toSet)
+    assert(end2Collected.map(_.elem) === c2.collect().toSet)
+    verifyMapping(end1Collected, start2Collected, mapping2)
+
+    val (Some(mapping3), start3, end3) = stages(2)
+    val start3Collected = start3.collect().toSet
+    val end3Collected = end3.collect().toSet
+    assert(start3Collected.map(_.elem) === c2.collect().toSet)
+    assert(end3Collected.map(_.elem) === d2.collect().toSet)
+    verifyMapping(end2Collected, start3Collected, mapping3)
+
+    sc2.stop()
+  }
 }

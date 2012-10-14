@@ -252,7 +252,7 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
 
   /** Takes an RDD and returns a set of RDDs representing the parent stages. */
   private def getParentStageRDDs(rdd: RDD[_]): Set[RDD[_]] = {
-    val ancestorDeps = new mutable.HashSet[Dependency[_]]
+    val parentStageRDDs = new mutable.HashSet[RDD[_]]
     val visited = new mutable.HashSet[RDD[_]]
     def visit(r: RDD[_]) {
       if (!visited(r)) {
@@ -260,7 +260,7 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
         for (dep <- r.dependencies) {
           dep match {
             case shufDep: ShuffleDependency[_,_,_] =>
-              ancestorDeps.add(shufDep)
+              parentStageRDDs.add(dep.rdd)
             case _ =>
               visit(dep.rdd)
           }
@@ -270,7 +270,7 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
     visit(rdd)
     // toSet is necessary because for some reason Scala doesn't think a mutable.HashSet[RDD[_]] is a
     // Set[RDD[_]]
-    ancestorDeps.map(_.rdd).toSet
+    parentStageRDDs.toSet
   }
 
   private def tagElements[T](rdd: RDD[T], p: T => Boolean): RDD[Tagged[T]] = {

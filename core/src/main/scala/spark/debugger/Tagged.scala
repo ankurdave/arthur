@@ -61,6 +61,8 @@ class IntSetTag private () extends Tag {
   }
 
   override def isTagged: Boolean = tags.nonEmpty
+
+  override def toString: String = "IntSetTag(%s)".format(tags)
 }
 
 object IntSetTag {
