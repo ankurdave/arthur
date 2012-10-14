@@ -12,6 +12,7 @@ import spark.RDD
 import spark.Dependency
 import spark.ShuffleDependency
 import spark.SparkContext
+import spark.SparkContext._
 import spark.scheduler.ResultTask
 import spark.scheduler.ShuffleMapTask
 import spark.scheduler.Task
@@ -146,6 +147,57 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
       taggedEndRDD.filter(tu => p(tu.elem)).map(tu => tu.tag).fold(IntSetTag.empty)(_ union _))
     val taggedStartRDD = new UniquelyTaggedRDD(startRDD)
     taggedStartRDD.filter(tt => (tags.value intersect tt.tag).isTagged).map(tt => tt.elem)
+  }
+
+  /**
+   * For each stage, produces a mapping from integers representing the elements in the first RDD of
+   * the stage, to tags propagated from the first RDD of the previous stage to the current
+   * RDD. Returns the list of such mappings, one per stage, starting from the first stage. For each
+   * stage, along with the mapping from the previous stage to the current stage, returns the tagged
+   * start RDD of the stage and the tagged end RDD.
+   */
+  def buildBackwardTraceMappings(
+      startRDD: RDD[_], endRDD: RDD[_])
+    : List[(Option[RDD[(Tag, Tag)]], RDD[Tagged[_]], RDD[Tagged[_]])] = {
+
+    val stages: List[(RDD[_], RDD[Tagged[_]])] = tagStages(startRDD, endRDD)
+    val prevStages: List[Option[(RDD[_], RDD[Tagged[_]])]] =
+      None :: stages.map(stage => Some(stage))
+    for (((startRDD, taggedEndRDD), prevStage) <- stages.zip(prevStages))
+    yield {
+      // Casting from UniquelyTaggedRDD[A] forSome { type A } to RDD[Tagged[_]] is legal because
+      // UniquelyTaggedRDD[A] is effectively covariant in A
+      val taggedStartRDD = new UniquelyTaggedRDD(startRDD).asInstanceOf[RDD[Tagged[_]]]
+      val tagMap = prevStage.map {
+        case (prevStartRDD, prevTaggedEndRDD) =>
+          // prevTaggedEndRDD and taggedStartRDD are differently-tagged versions of the same RDD. We
+          // join the two RDDs on their elements to extract the mapping from old tags to new tags
+          // across the two stages.
+          val oldTagged = prevTaggedEndRDD.map((tagged: Tagged[_]) => (tagged.elem, tagged.tag))
+          val newTagged = taggedStartRDD.map((tagged: Tagged[_]) => (tagged.elem, tagged.tag))
+          oldTagged.join(newTagged).map {
+            case (elem, (oldTag, newTag)) => (oldTag, newTag)
+          }
+      }
+      (tagMap, taggedStartRDD, taggedEndRDD)
+    }
+  }
+
+  /**
+   * For each stage from startRDD to endRDD, finds the start RDD of the stage and the end RDD tagged
+   * within the stage, and returns a list of pairs of these RDDs.
+   */
+  private def tagStages(startRDD: RDD[_], endRDD: RDD[_]): List[(RDD[_], RDD[Tagged[_]])] = {
+    if (endRDD.id == startRDD.id || !rddPathExists(startRDD, endRDD)) {
+      List()
+    } else {
+      val (taggedEndRDD, firstRDDInStage) = tagRDDWithinStage(
+        endRDD, startRDD, getParentStageRDDs(endRDD))
+      // Casting RDD[Tagged[A]] forSome { type A } to RDD[Tagged[_]] is legal because RDD[Tagged[A]]
+      // is effectively covariant in A
+      val rddsForStage = (firstRDDInStage, taggedEndRDD.asInstanceOf[RDD[Tagged[_]]])
+      tagStages(startRDD, firstRDDInStage) :+ rddsForStage
+    }
   }
 
   private def tagRDDWithinStage[A, T](
