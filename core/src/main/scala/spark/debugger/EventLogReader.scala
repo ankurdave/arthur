@@ -149,12 +149,21 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
     taggedStartRDD.filter(tt => (tags.value intersect tt.tag).isTagged).map(tt => tt.elem)
   }
 
+  /**
+   * Selects the elements in endRDD that match p, traces them backward until startRDD, and returns
+   * the resulting members of startRDD. Implemented using traceBackwardGivenMappings.
+   */
   def traceBackwardUsingMappings[T: ClassManifest, U: ClassManifest](
       startRDD: RDD[T], p: U => Boolean, endRDD: RDD[U]): RDD[T] = {
     val stageMappings = buildBackwardTraceMappings(startRDD, endRDD)
     traceBackwardGivenMappings(startRDD, p, endRDD, stageMappings)
   }
 
+  /**
+   * Given a set of mappings from the tags of one stage to the next, selects the elements in endRDD
+   * that match p, finds the tags associated with those elements, traces the tags backward using the
+   * mappings, and returns the elements in startRDD associated with the resulting tags.
+   */
   def traceBackwardGivenMappings[T: ClassManifest, U: ClassManifest](
       startRDD: RDD[T],
       p: U => Boolean,
