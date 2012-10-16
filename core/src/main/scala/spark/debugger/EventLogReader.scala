@@ -100,7 +100,7 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
    */
   def traceBackward[T: ClassManifest, U: ClassManifest](
       startRDD: RDD[T], elem: U, endRDD: RDD[U]): RDD[T] =
-    traceBackwardMaintainingSet(startRDD, { (x: U) => x == elem }, endRDD)
+    traceBackwardUsingMappings(startRDD, { (x: U) => x == elem }, endRDD)
 
   /**
    * Selects the elements in endRDD that match p, traces them backward until startRDD, and returns
@@ -147,6 +147,52 @@ class EventLogReader(sc: SparkContext, eventLogPath: Option[String] = None) exte
       taggedEndRDD.filter(tu => p(tu.elem)).map(tu => tu.tag).fold(IntSetTag.empty)(_ union _))
     val taggedStartRDD = new UniquelyTaggedRDD(startRDD)
     taggedStartRDD.filter(tt => (tags.value intersect tt.tag).isTagged).map(tt => tt.elem)
+  }
+
+  def traceBackwardUsingMappings[T: ClassManifest, U: ClassManifest](
+      startRDD: RDD[T], p: U => Boolean, endRDD: RDD[U]): RDD[T] = {
+    val stageMappings = buildBackwardTraceMappings(startRDD, endRDD)
+    traceBackwardGivenMappings(startRDD, p, endRDD, stageMappings)
+  }
+
+  def traceBackwardGivenMappings[T: ClassManifest, U: ClassManifest](
+      startRDD: RDD[T],
+      p: U => Boolean,
+      endRDD: RDD[U],
+      stageMappings: List[(Option[RDD[(Tag, Tag)]], RDD[Tagged[_]], RDD[Tagged[_]])]): RDD[T] = {
+    stageMappings.lastOption match {
+      case Some((_, _, lastStageTaggedEndRDD)) =>
+        // Casting RDD[Tagged[_]] to RDD[Tagged[U]] is legal because lastStageTaggedEndRDD is
+        // actually a tagged version of endRDD
+        val tagsInEndRDD = lastStageTaggedEndRDD.asInstanceOf[RDD[Tagged[U]]]
+          .filter(taggedElem => p(taggedElem.elem)).map(_.tag)
+        val tagsInStartRDD = stageMappings.flatMap {
+          case (mappingOption, _, _) => mappingOption
+        }.foldRight(tagsInEndRDD) {
+          (mapping, tagsSoFar) =>
+            // tagsSoFar contains a subset of the new tags in mapping. We want to trace tagsSoFar
+            // backwards by one stage, so we join tagsSoFar and mapping on these new tags and
+            // extract the old tag associated with each new tag.
+            val mappingNewToOld = mapping.map {
+              case (oldTag, newTag) => (newTag, oldTag)
+            }
+            tagsSoFar.map(tag => (tag, ())).join(mappingNewToOld).map {
+              case (newTag, ((), oldTag)) => oldTag
+            }
+        }
+        // Calling head is legal because we know stageMappings is non-empty, since lastOption
+        // returned Some
+        stageMappings.head match {
+          case (_, taggedStartRDD, _) =>
+            // Casting RDD[Tagged[_]] to RDD[Tagged[T]] is legal because taggedStartRDD is a tagged
+            // version of startRDD
+            val elems = taggedStartRDD.asInstanceOf[RDD[Tagged[T]]]
+            val tags = sc.broadcast(tagsInStartRDD.fold(IntSetTag.empty)(_ union _))
+            elems.filter(tt => (tags.value intersect tt.tag).isTagged).map(tt => tt.elem)
+        }
+      case None =>
+        sc.parallelize(List())
+    }
   }
 
   /**

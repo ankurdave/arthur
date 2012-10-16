@@ -62,6 +62,13 @@ class IntSetTag private () extends Tag {
 
   override def isTagged: Boolean = tags.nonEmpty
 
+  override def equals(that: Any): Boolean = that match {
+    case that: IntSetTag => tags == that.tags
+    case _ => false
+  }
+
+  override def hashCode = tags.hashCode
+
   override def toString: String = "IntSetTag(%s)".format(tags)
 }
 
@@ -102,6 +109,15 @@ class BooleanTag private () extends Tag {
   }
 
   override def isTagged: Boolean = tag
+
+  override def equals(that: Any): Boolean = that match {
+    case that: BooleanTag => tag == that.tag
+    case _ => false
+  }
+
+  override def hashCode = tag.hashCode
+
+  override def toString: String = "BooleanTag(%s)".format(tag)
 }
 
 object BooleanTag {
