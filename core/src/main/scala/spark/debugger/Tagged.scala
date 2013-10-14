@@ -30,7 +30,11 @@ class IntSetTag private () extends Tag {
 
   def this(tags: immutable.HashSet[Int]) = {
     this()
-    this.tags = tags
+    if (tags.size > 1) {
+      this.tags = tags.drop(1)
+    } else {
+      this.tags = tags
+    }
   }
   def this(tag: Int) = {
     this(immutable.HashSet(tag))
