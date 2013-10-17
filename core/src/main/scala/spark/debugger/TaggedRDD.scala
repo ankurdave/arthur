@@ -9,8 +9,8 @@ import spark.SparkContext
 import spark.Split
 
 class TaggedRDD[T: ClassManifest, TagType](
-  @transient val elements: RDD[T],
-  @transient val tags: TagRDD[TagType]
+  val elements: RDD[T],
+  val tags: TagRDD[TagType]
 ) extends RDD[(T, TagType)](elements.context) {
   override def splits = elements.splits
   override val dependencies = List(
@@ -43,7 +43,7 @@ abstract class TagRDD[TagType](
 }
 
 class BooleanTagRDD[T: ClassManifest](
-  @transient val elements: RDD[T],
+  val elements: RDD[T],
   p: T => Boolean
 ) extends TagRDD[Boolean](elements.context, elements.splits.length) {
   override def splits: Array[Split] = elements.splits
