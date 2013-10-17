@@ -72,7 +72,7 @@ abstract class RDD[T: ClassManifest](@transient private var sc: SparkContext) ex
   def preferredLocations(split: Split): Seq[String] = Nil
 
   // Optionally overridden by subclasses to allow tagging each element of the RDD
-  def tagged(tagger: RDDTagger): RDD[Tagged[T]] =
+  def tagged(tagger: RDDTagger): TaggedRDD[T] =
     throw new UnsupportedOperationException("tagged not implemented on " + this)
   
   def context = sc
@@ -446,8 +446,10 @@ class MappedRDD[U: ClassManifest, T: ClassManifest](
   override def splits = prev.splits
   override val dependencies = List(new OneToOneDependency(prev))
   override def compute(split: Split) = prev.iterator(split).map(f)
-  override def tagged(tagger: RDDTagger) =
-    new MappedRDD(tagger(prev), (taggedT: Tagged[T]) => taggedT.map(f))
+  override def tagged(tagger: RDDTagger) = {
+    val taggedPrev: TaggedRDD[T] = tagger(prev)
+    new TaggedRDD(taggedPrev.values.map(f), taggedPrev.tags)
+  }
 }
 
 class FlatMappedRDD[U: ClassManifest, T: ClassManifest](
@@ -459,7 +461,7 @@ class FlatMappedRDD[U: ClassManifest, T: ClassManifest](
   override val dependencies = List(new OneToOneDependency(prev))
   override def compute(split: Split) = prev.iterator(split).flatMap(f)
   override def tagged(tagger: RDDTagger) =
-    new FlatMappedRDD(tagger(prev), (taggedT: Tagged[T]) => taggedT.flatMap(f))
+    tagger(prev).flatMap((taggedT: Tagged[T]) => taggedT.flatMap(f))
 }
 
 class FilteredRDD[T: ClassManifest](prev: RDD[T], f: T => Boolean) extends RDD[T](prev.context) {
@@ -467,7 +469,7 @@ class FilteredRDD[T: ClassManifest](prev: RDD[T], f: T => Boolean) extends RDD[T
   override val dependencies = List(new OneToOneDependency(prev))
   override def compute(split: Split) = prev.iterator(split).filter(f)
   override def tagged(tagger: RDDTagger) =
-    new FilteredRDD(tagger(prev), (taggedT: Tagged[T]) => f(taggedT.elem))
+    tagger(prev).flatMap((taggedT: Tagged[T]) => if (f(taggedT.elem)) Some(taggedT) else None)
 }
 
 class GlommedRDD[T: ClassManifest](prev: RDD[T]) extends RDD[Array[T]](prev.context) {

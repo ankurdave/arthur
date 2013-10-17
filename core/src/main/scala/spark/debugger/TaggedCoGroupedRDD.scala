@@ -1,4 +1,4 @@
-package spark
+package spark.debugger
 
 import java.io.EOFException
 import java.io.ObjectInputStream
@@ -7,37 +7,38 @@ import java.net.URL
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashMap
 
-import spark.debugger.RDDTagger
-import spark.debugger.SamePartitionMappedRDD
-import spark.debugger.Tagged
+import spark.Split
+import spark.Aggregator
 
-sealed trait CoGroupSplitDep[K, V] extends Serializable
-case class NarrowCoGroupSplitDep[K, V](
-    rdd: RDD[(K, V1)] forSome { type V1 <: V },
+sealed trait TaggedCoGroupSplitDep[K, V] extends Serializable
+
+case class TaggedNarrowCoGroupSplitDep[K, V](
+    rdd: TaggedRDD[(K, V1)] forSome { type V1 <: V },
     split: Split)
   extends CoGroupSplitDep[K, V]
-case class ShuffleCoGroupSplitDep[K, V](shuffleId: Int) extends CoGroupSplitDep[K, V]
 
-class CoGroupSplit[K, V](idx: Int, val deps: Seq[CoGroupSplitDep[K, V]])
+case class TaggedShuffleCoGroupSplitDep[K, V](shuffleId: Int) extends TaggedCoGroupSplitDep[K, V]
+
+class TaggedCoGroupSplit[K, V](idx: Int, val deps: Seq[TaggedCoGroupSplitDep[K, V]])
   extends Split with Serializable {
 
   override val index: Int = idx
   override def hashCode(): Int = idx
 }
 
-class CoGroupAggregator[K, V]
-  extends Aggregator[K, V, ArrayBuffer[V]] (
-    { x => ArrayBuffer(x) },
-    { (b, x) => b += x },
-    { (b1, b2) => b1 ++ b2 })
-  with Serializable
+// class TaggedCoGroupAggregator[K, V]
+//   extends Aggregator[K, V, ArrayBuffer[V]] (
+//     { x => ArrayBuffer(x) },
+//     { (b, x) => b += x },
+//     { (b1, b2) => b1 ++ b2 })
+//   with Serializable
 
-class CoGroupedRDD[K, V](
-    @transient @debugger.EventLogSerializable rdds: Seq[RDD[(K, V1)] forSome { type V1 <: V }],
+class TaggedCoGroupedRDD[K, V](
+    @transient @debugger.EventLogSerializable rdds: Seq[TaggedRDD[(K, V1)] forSome { type V1 <: V }],
     part: Partitioner)
-  extends RDD[(K, Seq[Seq[V1] forSome { type V1 <: V }])](rdds.head.context) with Logging {
+  extends TaggedRDD[(K, Seq[Seq[V1] forSome { type V1 <: V }])](rdds.head.context) with Logging {
   
-  val aggr = new CoGroupAggregator[K, V]
+  // val aggr = new CoGroupAggregator[K, V]
   
   @transient @debugger.EventLogSerializable
   override val dependencies: List[Dependency[(K, V1)] forSome { type V1 <: V }] = {
