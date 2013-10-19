@@ -31,25 +31,22 @@ class TaggedRDD[T: ClassManifest, TagType](
   * RDD, where values are Arrays of the same size as the corresponding
   * partitions of the elements RDD.
   */
-// TODO: write a custom partitioner for TagRDD that partitions by taking the key
-// and using it directly as the split ID
-// TODO: subclass this
 abstract class TagRDD[TagType](
   @transient sc: SparkContext,
-  numPartitions: Int
+  @transient splits_ : Array[Split]
 ) extends RDD[(Int, Array[TagType])](sc) {
+  override def splits: Array[Split] = splits_
   override val partitioner: Option[Partitioner] =
-    Some(new ExplicitSplitPartitioner(numPartitions))
+    Some(new ExplicitSplitPartitioner(splits_.length))
 }
 
-class BooleanTagRDD[T: ClassManifest](
-  val elements: RDD[T],
-  p: T => Boolean
-) extends TagRDD[Boolean](elements.context, elements.splits.length) {
-  override def splits: Array[Split] = elements.splits
+class OneToOneTagRDD[TagType: ClassManifest](
+  val elements: RDD[_],
+  val tagger: RDDTagger[TagType]
+) extends TagRDD[TagType](elements.context, elements.splits) {
   override val dependencies = List(new OneToOneDependency(elements))
-  override def compute(split: Split): Iterator[(Int, Array[Boolean])] = {
-    List((split.index, elements.iterator(split).map(t => p(t)).toArray)).iterator
+  override def compute(split: Split): Iterator[(Int, Array[TagType])] = {
+    List((split.index, elements.iterator(split).map(t => tagger(t)).toArray)).iterator
   }
 }
 
@@ -63,5 +60,21 @@ class ExplicitSplitPartitioner(partitions: Int) extends Partitioner {
       esp.numPartitions == numPartitions
     case _ =>
       false
+  }
+}
+
+class FlatMappedTagRDD[U: ClassManifest, T: ClassManifest, TagType: ClassManifest](
+  prev: TaggedRDD[T, TagType],
+  f: T => TraversableOnce[U]
+) extends TagRDD[TagType](prev.context, prev.splits) {
+  override val dependencies = List(
+    new OneToOneDependency(prev))
+  override def compute(split: Split): Iterator[(Int, Array[TagType])] = {
+    val newTags =
+      for {
+        (oldElem, oldTag) <- prev.iterator(split)
+        newElem <- f(oldElem)
+      } yield oldTag
+    List((split.index, newTags.toArray)).iterator
   }
 }

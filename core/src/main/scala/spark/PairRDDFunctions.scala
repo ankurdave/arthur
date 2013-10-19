@@ -436,11 +436,11 @@ class SortedRDD[K <% Ordered[K], V](prev: RDD[(K, V)], ascending: Boolean)
       .sortWith((x, y) => if (ascending) x._1 < y._1 else x._1 > y._1).iterator
   }
 
-  override def tagged(tagger: RDDTagger): RDD[Tagged[(K, V)]] = {
-    val taggedPrev = tagger(prev).map { case Tagged((k, v), tag) => (OrderedTagged(k, tag), v) }
-    val sorted = new SortedRDD(taggedPrev, ascending)
-    sorted.map { case (OrderedTagged(k, tag), v) => Tagged((k, v), tag) }
-  }
+  // override def tagged(tagger: RDDTagger): RDD[Tagged[(K, V)]] = {
+  //   val taggedPrev = tagger(prev).map { case Tagged((k, v), tag) => (OrderedTagged(k, tag), v) }
+  //   val sorted = new SortedRDD(taggedPrev, ascending)
+  //   sorted.map { case (OrderedTagged(k, tag), v) => Tagged((k, v), tag) }
+  // }
 } 
  
 class MappedValuesRDD[K, V, U](prev: RDD[(K, V)], f: V => U) extends RDD[(K, U)](prev.context) {
@@ -448,13 +448,13 @@ class MappedValuesRDD[K, V, U](prev: RDD[(K, V)], f: V => U) extends RDD[(K, U)]
   override val dependencies = List(new OneToOneDependency(prev))
   override val partitioner = prev.partitioner
   override def compute(split: Split) = prev.iterator(split).map{case (k, v) => (k, f(v))}
-  override def tagged(tagger: RDDTagger) =
-    new SamePartitionMappedRDD(
-      tagger(prev),
-      (taggedPair: Tagged[(K, V)]) => taggedPair match {
-        case Tagged((k, v), tag) => Tagged((k, f(v)), tag)
-      }
-    )
+  // override def tagged(tagger: RDDTagger) =
+  //   new SamePartitionMappedRDD(
+  //     tagger(prev),
+  //     (taggedPair: Tagged[(K, V)]) => taggedPair match {
+  //       case Tagged((k, v), tag) => Tagged((k, f(v)), tag)
+  //     }
+  //   )
 }
 
 class FlatMappedValuesRDD[K, V, U](prev: RDD[(K, V)], f: V => TraversableOnce[U])
@@ -468,19 +468,19 @@ class FlatMappedValuesRDD[K, V, U](prev: RDD[(K, V)], f: V => TraversableOnce[U]
     prev.iterator(split).flatMap { case (k, v) => f(v).map(x => (k, x)) }
   }
 
-  override def tagged(tagger: RDDTagger): RDD[Tagged[(K, U)]] = {
-    val taggedPrev: RDD[(K, Tagged[V])] =
-      new SamePartitionMappedRDD(tagger(prev), (tp: Tagged[(K, V)]) => tp match {
-        case Tagged((k, v), tag) => (k, Tagged(v, tag))
-      })
-    val fmv: RDD[(K, Tagged[U])] =
-      new FlatMappedValuesRDD(taggedPrev, (tv: Tagged[V]) => tv match {
-        case Tagged(v, tag) => f(v).map(u => Tagged(u, tag))
-      })
-    new SamePartitionMappedRDD(fmv, (pair: (K, Tagged[U])) => pair match {
-      case (k, Tagged(u, tag)) => Tagged((k, u), tag)
-    })
-  }
+  // override def tagged(tagger: RDDTagger): RDD[Tagged[(K, U)]] = {
+  //   val taggedPrev: RDD[(K, Tagged[V])] =
+  //     new SamePartitionMappedRDD(tagger(prev), (tp: Tagged[(K, V)]) => tp match {
+  //       case Tagged((k, v), tag) => (k, Tagged(v, tag))
+  //     })
+  //   val fmv: RDD[(K, Tagged[U])] =
+  //     new FlatMappedValuesRDD(taggedPrev, (tv: Tagged[V]) => tv match {
+  //       case Tagged(v, tag) => f(v).map(u => Tagged(u, tag))
+  //     })
+  //   new SamePartitionMappedRDD(fmv, (pair: (K, Tagged[U])) => pair match {
+  //     case (k, Tagged(u, tag)) => Tagged((k, u), tag)
+  //   })
+  // }
 }
 
 object Manifests {

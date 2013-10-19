@@ -29,8 +29,10 @@ import it.unimi.dsi.fastutil.objects.{Object2LongOpenHashMap => OLMap}
 
 import spark.debugger.EventLogInputStream
 import spark.debugger.EventLogOutputStream
+import spark.debugger.FlatMappedTagRDD
 import spark.debugger.RDDTagger
-import spark.debugger.Tagged
+import spark.debugger.TaggedRDD
+
 import spark.partial.BoundedDouble
 import spark.partial.CountEvaluator
 import spark.partial.GroupedCountEvaluator
@@ -72,7 +74,7 @@ abstract class RDD[T: ClassManifest](@transient private var sc: SparkContext) ex
   def preferredLocations(split: Split): Seq[String] = Nil
 
   // Optionally overridden by subclasses to allow tagging each element of the RDD
-  def tagged(tagger: RDDTagger): TaggedRDD[T] =
+  def tagged[TagType: ClassManifest](tagger: RDDTagger[TagType]): TaggedRDD[T, TagType] =
     throw new UnsupportedOperationException("tagged not implemented on " + this)
   
   def context = sc
@@ -446,9 +448,9 @@ class MappedRDD[U: ClassManifest, T: ClassManifest](
   override def splits = prev.splits
   override val dependencies = List(new OneToOneDependency(prev))
   override def compute(split: Split) = prev.iterator(split).map(f)
-  override def tagged(tagger: RDDTagger) = {
-    val taggedPrev: TaggedRDD[T] = tagger(prev)
-    new TaggedRDD(taggedPrev.values.map(f), taggedPrev.tags)
+  override def tagged[TagType: ClassManifest](tagger: RDDTagger[TagType]) = {
+    val taggedPrev: TaggedRDD[T, TagType] = tagger(prev)
+    new TaggedRDD(taggedPrev.elements.map(f), taggedPrev.tags)
   }
 }
 
@@ -460,16 +462,24 @@ class FlatMappedRDD[U: ClassManifest, T: ClassManifest](
   override def splits = prev.splits
   override val dependencies = List(new OneToOneDependency(prev))
   override def compute(split: Split) = prev.iterator(split).flatMap(f)
-  override def tagged(tagger: RDDTagger) =
-    tagger(prev).flatMap((taggedT: Tagged[T]) => taggedT.flatMap(f))
+  override def tagged[TagType: ClassManifest](tagger: RDDTagger[TagType]): TaggedRDD[U, TagType] = {
+    // TODO(ankurdave): This RDD will get double-computed when the result is
+    // evaluated: once to compute the elements and once to compute the
+    // tags. Find a way to avoid this.
+    val taggedPrev: TaggedRDD[T, TagType] = tagger(prev)
+    new TaggedRDD(this, new FlatMappedTagRDD(taggedPrev, f))
+  }
 }
 
 class FilteredRDD[T: ClassManifest](prev: RDD[T], f: T => Boolean) extends RDD[T](prev.context) {
   override def splits = prev.splits
   override val dependencies = List(new OneToOneDependency(prev))
   override def compute(split: Split) = prev.iterator(split).filter(f)
-  override def tagged(tagger: RDDTagger) =
-    tagger(prev).flatMap((taggedT: Tagged[T]) => if (f(taggedT.elem)) Some(taggedT) else None)
+  override def tagged[TagType: ClassManifest](tagger: RDDTagger[TagType]) = {
+    val taggedPrev: TaggedRDD[T, TagType] = tagger(prev)
+    val flatMapF: T => TraversableOnce[T] = { t => if (f(t)) Some(t) else None }
+    new TaggedRDD(this, new FlatMappedTagRDD(taggedPrev, flatMapF))
+  }
 }
 
 class GlommedRDD[T: ClassManifest](prev: RDD[T]) extends RDD[Array[T]](prev.context) {

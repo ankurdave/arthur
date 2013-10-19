@@ -132,8 +132,9 @@ case class OrderedTagged[A <% Ordered[A]](val elem: A, val tag: Tag)
   def compare(that: OrderedTagged[A]) = this.elem.compare(that.elem)
 }
 
-trait RDDTagger {
-  def apply[A](a: RDD[A]): RDD[Tagged[A]]
+trait RDDTagger[TagType] extends Serializable {
+  def apply[A](a: RDD[A]): TaggedRDD[A, TagType]
+  def apply[A](a: A): TagType
 }
 
 class UniquelyTaggedRDD[T](prev: RDD[T]) extends RDD[Tagged[T]](prev.context) {
@@ -163,6 +164,6 @@ class SamePartitionMappedRDD[U: ClassManifest, T: ClassManifest](
   override val dependencies = List(new OneToOneDependency(prev))
   // override val partitioner = prev.partitioner
   override def compute(split: Split) = prev.iterator(split).map(f)
-  override def tagged(tagger: RDDTagger) =
-    new SamePartitionMappedRDD(tagger(prev), (taggedT: Tagged[T]) => taggedT.map(f))
+  // override def tagged(tagger: RDDTagger) =
+  //   new SamePartitionMappedRDD(tagger(prev), (taggedT: Tagged[T]) => taggedT.map(f))
 }

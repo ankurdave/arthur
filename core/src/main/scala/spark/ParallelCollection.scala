@@ -5,8 +5,8 @@ import scala.collection.immutable.NumericRange
 import scala.collection.mutable.ArrayBuffer
 
 import spark.debugger.RDDTagger
-import spark.debugger.Tag
-import spark.debugger.Tagged
+import spark.debugger.TaggedRDD
+import spark.debugger.OneToOneTagRDD
 
 class ParallelCollectionSplit[T: ClassManifest](
     val rddId: Long,
@@ -49,8 +49,8 @@ class ParallelCollection[T: ClassManifest](
   
   override val dependencies: List[Dependency[_]] = Nil
 
-  override def tagged(tagger: RDDTagger) =
-    this.map(t => Tagged(t, Tag.empty))
+  override def tagged[TagType: ClassManifest](tagger: RDDTagger[TagType]): TaggedRDD[T, TagType] =
+    new TaggedRDD(this, new OneToOneTagRDD(this, tagger))
 }
 
 private object ParallelCollection {

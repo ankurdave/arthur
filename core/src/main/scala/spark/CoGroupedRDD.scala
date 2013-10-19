@@ -108,27 +108,27 @@ class CoGroupedRDD[K, V](
     map.iterator
   }
 
-  override def tagged(tagger: RDDTagger)
-      : TaggedRDD[(K, Seq[Seq[V1] forSome { type V1 <: V }])] = {
-    val taggedRDDs: Seq[RDD[(K, Tagged[V1])] forSome { type V1 <: V }] =
-      rdds.map(rdd => new SamePartitionMappedRDD(
-        tagger(rdd),
-        (taggedPair: Tagged[(K, V1)] forSome { type V1 <: V }) => taggedPair match {
-          case Tagged((k, v), tag) => (k, Tagged(v, tag))
-        }
-      ))
-    val cogrouped: RDD[(K, Seq[Seq[Tagged[V1]] forSome { type V1 <: V }])] =
-      new CoGroupedRDD[K, Tagged[V]](taggedRDDs, part)
-    new SamePartitionMappedRDD(
-      cogrouped,
-      (pair: (K, Seq[Seq[Tagged[V1]] forSome { type V1 <: V }])) => pair match {
-        case (k, seqSeqTagged) =>
-          val tag =
-            (for (seqTagged <- seqSeqTagged; tagged <- seqTagged)
-             yield tagged.tag).reduce(_ union _)
-          val untaggedValues = seqSeqTagged.map(seqTagged => seqTagged.map(tagged => tagged.elem))
-          Tagged((k, untaggedValues), tag)
-      }
-    )
-  }
+  // override def tagged(tagger: RDDTagger)
+  //     : TaggedRDD[(K, Seq[Seq[V1] forSome { type V1 <: V }])] = {
+  //   val taggedRDDs: Seq[RDD[(K, Tagged[V1])] forSome { type V1 <: V }] =
+  //     rdds.map(rdd => new SamePartitionMappedRDD(
+  //       tagger(rdd),
+  //       (taggedPair: Tagged[(K, V1)] forSome { type V1 <: V }) => taggedPair match {
+  //         case Tagged((k, v), tag) => (k, Tagged(v, tag))
+  //       }
+  //     ))
+  //   val cogrouped: RDD[(K, Seq[Seq[Tagged[V1]] forSome { type V1 <: V }])] =
+  //     new CoGroupedRDD[K, Tagged[V]](taggedRDDs, part)
+  //   new SamePartitionMappedRDD(
+  //     cogrouped,
+  //     (pair: (K, Seq[Seq[Tagged[V1]] forSome { type V1 <: V }])) => pair match {
+  //       case (k, seqSeqTagged) =>
+  //         val tag =
+  //           (for (seqTagged <- seqSeqTagged; tagged <- seqTagged)
+  //            yield tagged.tag).reduce(_ union _)
+  //         val untaggedValues = seqSeqTagged.map(seqTagged => seqTagged.map(tagged => tagged.elem))
+  //         Tagged((k, untaggedValues), tag)
+  //     }
+  //   )
+  // }
 }
